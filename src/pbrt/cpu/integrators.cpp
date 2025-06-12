@@ -970,7 +970,8 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
         if (ray.medium) {
             // Sample the participating medium
             bool scattered = false, terminated = false;
-            Float tMax = si ? si->tHit : Infinity;
+            //Float tMax = si ? si->tHit : Infinity;
+            Float tMax = si ? si->tHit : 0;
             // Initialize _RNG_ for sampling the majorant transmittance
             uint64_t hash0 = Hash(sampler.Get1D());
             uint64_t hash1 = Hash(sampler.Get1D());
@@ -1337,7 +1338,8 @@ SampledSpectrum VolPathIntegrator::SampleLd(const Interaction &intr, const BSDF 
 
         // Update transmittance for current ray segment
         if (lightRay.medium) {
-            Float tMax = si ? si->tHit : (1 - ShadowEpsilon);
+            //Float tMax = si ? si->tHit : (1 - ShadowEpsilon);
+            Float tMax = si ? si->tHit : 0;
             Float u = rng.Uniform<Float>();
             SampledSpectrum T_maj =
                 SampleT_maj(lightRay, tMax, u, rng, lambda,

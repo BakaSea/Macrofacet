@@ -1,0 +1,57 @@
+Sampler "halton"
+  "integer pixelsamples" 128
+LookAt 0 3 2
+       0 0 0
+       0 0 1
+
+Camera "perspective"
+    "float fov" 60
+
+Film "rgb"
+  "integer xresolution" 1920
+  "integer yresolution" 1080
+  "string filename" "sample.exr"
+
+Integrator "volpath"
+  "integer maxdepth" 1
+
+WorldBegin
+
+AttributeBegin
+Rotate 10 1 0 0
+LightSource "infinite"
+  "string filename" "textures/sky.exr" "float scale" 4
+AttributeEnd
+
+AttributeBegin
+Translate 0 0 -1
+Material "diffuse" "rgb reflectance" [ .4 .45 .35 ]
+Shape "disk" "float radius" 1000
+AttributeEnd
+
+MakeNamedMedium "sggx1" "string type" "fuzzy" "float sigma" 0.16666667 "float k" 10
+MakeNamedMedium "sggx2" "string type" "fuzzy" "float sigma" 0.08333334 "float k" 10
+MakeNamedMedium "sggx3" "string type" "fuzzy" "float sigma" 0.01666667 "float k" 10
+
+AttributeBegin
+Translate -1.5 0 0
+MediumInterface "sggx1" ""
+Material "interface"
+Shape "plymesh" "string filename" "cube.ply"
+AttributeEnd
+
+AttributeBegin
+Scale 1 1 0.5
+Translate 0 0 0
+MediumInterface "sggx2" ""
+Material "interface"
+Shape "plymesh" "string filename" "cube.ply"
+AttributeEnd
+
+AttributeBegin
+Scale 1 1 0.1
+Translate 1.5 0 0
+MediumInterface "sggx3" ""
+Material "interface"
+Shape "plymesh" "string filename" "cube.ply"
+AttributeEnd

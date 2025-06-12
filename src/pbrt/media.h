@@ -69,6 +69,148 @@ class HGPhaseFunction {
     Float g;
 };
 
+struct SGGX {
+    Float S_xx, S_xy, S_xz, S_yy, S_yz, S_zz;
+    SGGX() = default;
+
+    PBRT_CPU_GPU
+    SGGX(Float roughness) {
+        S_xx = S_yy = roughness * roughness;
+        S_zz = 1.f;
+        S_xy = S_xz = S_yz = 0.f;
+    }
+
+    PBRT_CPU_GPU
+    Float Sigma(Vector3f wi) const {
+        const Float sigmaSquared =
+            wi.x * wi.x * S_xx + wi.y * wi.y * S_yy + wi.z * wi.z * S_zz +
+            2.f * (wi.x * wi.y * S_xy + wi.x * wi.z * S_xz + wi.y * wi.z * S_yz);
+        return (sigmaSquared > 0.f) ? sqrtf(sigmaSquared) : 0.f;
+    }
+
+    PBRT_CPU_GPU
+    Float D(Vector3f wm) const {
+        const Float detS = S_xx * S_yy * S_zz - S_xx * S_yz * S_yz - S_yy * S_xz * S_xz -
+                           S_zz * S_xy * S_xy + 2.f * S_xy * S_xz * S_yz;
+        const Float den = wm.x * wm.x * (S_yy * S_zz - S_yz * S_yz) +
+                          wm.y * wm.y * (S_xx * S_zz - S_xz * S_xz) +
+                          wm.z * wm.z * (S_xx * S_yy - S_xy * S_xy) +
+                          2.0f * (wm.x * wm.y * (S_xz * S_yz - S_zz * S_xy) +
+                                  wm.x * wm.z * (S_xy * S_yz - S_yy * S_xz) +
+                                  wm.y * wm.z * (S_xy * S_xz - S_xx * S_yz));
+        const Float D = powf(fabsf(detS), 1.5f) / (Pi * den * den);
+        return D;
+    }
+
+    PBRT_CPU_GPU
+    Float EvalSpecular(Vector3f wi, Vector3f wo) const {
+        Vector3f wh = Normalize(wi + wo);
+        return 0.25f * D(wh) / Sigma(wi);
+    }
+
+    PBRT_CPU_GPU
+    void buildOrthonormalBasis(Vector3f &omega_1, Vector3f &omega_2,
+                               const Vector3f &omega_3) const {
+        if (omega_3.z < -0.9999999f) {
+            omega_1 = Vector3f(0.0f, -1.0f, 0.0f);
+            omega_2 = Vector3f(-1.0f, 0.0f, 0.0f);
+        } else {
+            const float a = 1.0f / (1.0f + omega_3.z);
+            const float b = -omega_3.x * omega_3.y * a;
+            omega_1 = Vector3f(1.0f - omega_3.x * omega_3.x * a, b, -omega_3.x);
+            omega_2 = Vector3f(b, 1.0f - omega_3.y * omega_3.y * a, -omega_3.y);
+        }
+    }
+
+    PBRT_CPU_GPU
+    Vector3f SampleVNDF(Vector3f wi, Float u1, Float u2) const {
+        // generate sample (u, v, w)
+        const Float r = sqrtf(u1);
+        const Float phi = 2.0f * Pi * u2;
+        const Float u = r * cosf(phi);
+        const Float v = r * sinf(phi);
+        const Float w = sqrtf(1.0f - u * u - v * v);
+        // build orthonormal basis
+        Vector3f wk, wj;
+        buildOrthonormalBasis(wk, wj, wi);
+        // project S in this basis
+        const Float S_kk =
+            wk.x * wk.x * S_xx + wk.y * wk.y * S_yy + wk.z * wk.z * S_zz +
+            2.0f * (wk.x * wk.y * S_xy + wk.x * wk.z * S_xz + wk.y * wk.z * S_yz);
+        const Float S_jj =
+            wj.x * wj.x * S_xx + wj.y * wj.y * S_yy + wj.z * wj.z * S_zz +
+            2.0f * (wj.x * wj.y * S_xy + wj.x * wj.z * S_xz + wj.y * wj.z * S_yz);
+        const Float S_ii =
+            wi.x * wi.x * S_xx + wi.y * wi.y * S_yy + wi.z * wi.z * S_zz +
+            2.0f * (wi.x * wi.y * S_xy + wi.x * wi.z * S_xz + wi.y * wi.z * S_yz);
+        const Float S_kj = wk.x * wj.x * S_xx + wk.y * wj.y * S_yy + wk.z * wj.z * S_zz +
+                           (wk.x * wj.y + wk.y * wj.x) * S_xy +
+                           (wk.x * wj.z + wk.z * wj.x) * S_xz +
+                           (wk.y * wj.z + wk.z * wj.y) * S_yz;
+        const Float S_ki = wk.x * wi.x * S_xx + wk.y * wi.y * S_yy + wk.z * wi.z * S_zz +
+                           (wk.x * wi.y + wk.y * wi.x) * S_xy +
+                           (wk.x * wi.z + wk.z * wi.x) * S_xz +
+                           (wk.y * wi.z + wk.z * wi.y) * S_yz;
+        const Float S_ji = wj.x * wi.x * S_xx + wj.y * wi.y * S_yy + wj.z * wi.z * S_zz +
+                           (wj.x * wi.y + wj.y * wi.x) * S_xy +
+                           (wj.x * wi.z + wj.z * wi.x) * S_xz +
+                           (wj.y * wi.z + wj.z * wi.y) * S_yz;
+        // compute normal
+        Float sqrtDetSkji =
+            sqrtf(fabsf(S_kk * S_jj * S_ii - S_kj * S_kj * S_ii - S_ki * S_ki * S_jj -
+                        S_ji * S_ji * S_kk + 2.0f * S_kj * S_ki * S_ji));
+        Float inv_sqrtS_ii = 1.0f / sqrtf(S_ii);
+        Float tmp = sqrtf(S_jj * S_ii - S_ji * S_ji);
+        Vector3f Mk(sqrtDetSkji / tmp, 0.0f, 0.0f);
+        Vector3f Mj(-inv_sqrtS_ii * (S_ki * S_ji - S_kj * S_ii) / tmp, inv_sqrtS_ii * tmp,
+                    0);
+        Vector3f Mi(inv_sqrtS_ii * S_ki, inv_sqrtS_ii * S_ji, inv_sqrtS_ii * S_ii);
+        Vector3f wm_kji = Normalize(u * Mk + v * Mj + w * Mi);
+        // rotate back to world basis
+        return wm_kji.x * wk + wm_kji.y * wj + wm_kji.z * wi;
+    }
+
+    Vector3f SampleSpecular(const Vector3f wi, Point2f u) const {
+        // sample VNDF
+        const Vector3f wm = SampleVNDF(wi, u.x, u.y);
+        // specular reflection
+        const Vector3f wo = -wi + 2.0f * wm * Dot(wm, wi);
+        return wo;
+    }
+
+};
+
+class SGGXPhaseFunction {
+  public:
+    SGGXPhaseFunction() = default;
+    PBRT_CPU_GPU
+    SGGXPhaseFunction(Float roughness) : sggx(roughness) {
+
+    }
+
+    PBRT_CPU_GPU
+    Float p(Vector3f wo, Vector3f wi) const {
+        return sggx.EvalSpecular(wo, wi);
+    }
+
+    PBRT_CPU_GPU
+    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
+        Vector3f wi = sggx.SampleSpecular(wo, u);
+        Float pdf = p(wo, wi);
+        return PhaseFunctionSample{pdf, wi, pdf};
+    }
+
+    PBRT_CPU_GPU
+    Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi); }
+
+    static const char *Name() { return "SGGX"; }
+
+    std::string ToString() const;
+
+  private:
+    SGGX sggx;
+};
+
 // MediumProperties Definition
 struct MediumProperties {
     SampledSpectrum sigma_a, sigma_s;
@@ -213,6 +355,53 @@ class DDAMajorantIterator {
     int step[3], voxelLimit[3], voxel[3];
 };
 
+class FuzzyMedium {
+  public:
+    using MajorantIterator = HomogeneousMajorantIterator;
+
+    FuzzyMedium(Spectrum albedo, Float k, Float roughness, Float sigma, Allocator alloc)
+        : albedo_spec(albedo, alloc),
+          k(k),
+          sggx(roughness),
+          sigma(sigma),
+          phase(roughness) {
+
+    }
+
+    static FuzzyMedium *Create(const ParameterDictionary &parameters, const FileLoc *loc,
+                               Allocator alloc);
+
+    PBRT_CPU_GPU
+    bool IsEmissive() const { return false; }
+
+    PBRT_CPU_GPU
+    Float Density(Float x) const {
+        return k * Gaussian(x, 0, sigma);
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
+        Error("SamplePoint No implement!");
+        return MediumProperties{};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
+                                          const SampledWavelengths &lambda) const;
+
+    std::string ToString() const;
+
+  private:
+    DenselySampledSpectrum albedo_spec;
+    SGGXPhaseFunction phase;
+    SGGX sggx;
+    Float k, sigma;
+};
+
 // HomogeneousMedium Definition
 class HomogeneousMedium {
   public:
@@ -243,6 +432,12 @@ class HomogeneousMedium {
         SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
         SampledSpectrum Le = Le_spec.Sample(lambda);
         return MediumProperties{sigma_a, sigma_s, &phase, Le};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const {
+        return SamplePoint(p, lambda);
     }
 
     PBRT_CPU_GPU
@@ -316,6 +511,12 @@ class GridMedium {
         }
 
         return MediumProperties{sigma_a, sigma_s, &phase, Le};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const {
+        return SamplePoint(p, lambda);
     }
 
     PBRT_CPU_GPU
@@ -401,6 +602,12 @@ class RGBGridMedium {
     }
 
     PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const {
+        return SamplePoint(p, lambda);
+    }
+
+    PBRT_CPU_GPU
     DDAMajorantIterator SampleRay(Ray ray, Float raytMax,
                                   const SampledWavelengths &lambda) const {
         // Transform ray to medium's space and compute bounds overlap
@@ -468,6 +675,12 @@ class CloudMedium {
         SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
 
         return MediumProperties{sigma_a, sigma_s, &phase, SampledSpectrum(0.f)};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const {
+        return SamplePoint(p, lambda);
     }
 
     PBRT_CPU_GPU
@@ -632,6 +845,12 @@ class NanoVDBMedium {
     }
 
     PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const {
+        return SamplePoint(p, lambda);
+    }
+
+    PBRT_CPU_GPU
     DDAMajorantIterator SampleRay(Ray ray, Float raytMax,
                                   const SampledWavelengths &lambda) const {
         // Transform ray to medium's space and compute bounds overlap
@@ -705,6 +924,12 @@ PBRT_CPU_GPU inline MediumProperties Medium::SamplePoint(Point3f p,
     return Dispatch(sample);
 }
 
+PBRT_CPU_GPU inline MediumProperties Medium::SamplePoint(
+    Point3f p, Vector3f wo, const SampledWavelengths& lambda) const {
+    auto sample = [&](auto ptr) { return ptr->SamplePoint(p, wo, lambda); };
+    return Dispatch(sample);
+}
+
 // Medium Sampling Function Definitions
 inline RayMajorantIterator Medium::SampleRay(Ray ray, Float tMax,
                                              const SampledWavelengths &lambda,
@@ -773,7 +998,8 @@ PBRT_CPU_GPU SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, RNG &rng,
                 // Call callback function for sample within segment
                 PBRT_DBG("t < seg->tMax\n");
                 T_maj *= FastExp(-(t - tMin) * seg->sigma_maj);
-                MediumProperties mp = medium->SamplePoint(ray(t), lambda);
+                //MediumProperties mp = medium->SamplePoint(ray(t), lambda);
+                MediumProperties mp = medium->SamplePoint(ray(t), -ray.d, lambda);
                 if (!callback(ray(t), mp, seg->sigma_maj, T_maj)) {
                     // Returning out of doubly-nested while loop is not as good perf. wise
                     // on the GPU vs using "done" here.

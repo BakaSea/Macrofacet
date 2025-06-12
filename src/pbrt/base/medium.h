@@ -26,8 +26,9 @@ struct PhaseFunctionSample {
 
 // PhaseFunction Definition
 class HGPhaseFunction;
+class SGGXPhaseFunction;
 
-class PhaseFunction : public TaggedPointer<HGPhaseFunction> {
+class PhaseFunction : public TaggedPointer<HGPhaseFunction, SGGXPhaseFunction> {
   public:
     // PhaseFunction Interface
     using TaggedPointer::TaggedPointer;
@@ -42,6 +43,7 @@ class PhaseFunction : public TaggedPointer<HGPhaseFunction> {
     PBRT_CPU_GPU inline Float PDF(Vector3f wo, Vector3f wi) const;
 };
 
+class FuzzyMedium;
 class HomogeneousMedium;
 class GridMedium;
 class RGBGridMedium;
@@ -75,7 +77,7 @@ class RayMajorantIterator
 // Medium Definition
 class Medium
     : public TaggedPointer<  // Medium Types
-          HomogeneousMedium, GridMedium, RGBGridMedium, CloudMedium, NanoVDBMedium
+          FuzzyMedium, HomogeneousMedium, GridMedium, RGBGridMedium, CloudMedium, NanoVDBMedium
 
           > {
   public:
@@ -93,6 +95,10 @@ class Medium
 
     PBRT_CPU_GPU
     MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const;
 
     // Medium Public Methods
     RayMajorantIterator SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda,

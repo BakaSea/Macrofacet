@@ -66,6 +66,10 @@ std::string DDAMajorantIterator::ToString() const {
                         voxel[0], voxel[1], voxel[2], grid);
 }
 
+std::string SGGXPhaseFunction::ToString() const {
+    return StringPrintf("[ SGGXPhaseFunction ]");
+}
+
 // HenyeyGreenstein Method Definitions
 std::string HGPhaseFunction::ToString() const {
     return StringPrintf("[ HGPhaseFunction g: %f ]", g);
@@ -161,6 +165,44 @@ std::string Medium::ToString() const {
 
     auto ts = [&](auto ptr) { return ptr->ToString(); };
     return DispatchCPU(ts);
+}
+
+FuzzyMedium *FuzzyMedium::Create(const ParameterDictionary &parameters,
+                                 const FileLoc *loc, Allocator alloc) {
+    Spectrum albedo = nullptr;
+    if (!albedo) {
+        albedo =
+            parameters.GetOneSpectrum("albedo", nullptr, SpectrumType::Albedo, alloc);
+        if (!albedo)
+            albedo = alloc.new_object<ConstantSpectrum>(1.f);
+    }
+    Float k = parameters.GetOneFloat("k", 1.f);
+    Float roughness = parameters.GetOneFloat("roughness", 1.f);
+    Float sigma = parameters.GetOneFloat("sigma", 1.f/3.f);
+    return alloc.new_object<FuzzyMedium>(albedo, k, roughness, sigma, alloc);
+}
+
+PBRT_CPU_GPU MediumProperties
+FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
+    Float rou = Density(p.z + 2.f);
+    Float projectedArea = sggx.Sigma(wo);
+    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
+    SampledSpectrum albedo = albedo_spec.Sample(lambda);
+    SampledSpectrum sigma_s = albedo * sigma_t;
+    SampledSpectrum sigma_a = sigma_t - sigma_s;
+    return MediumProperties{sigma_a, sigma_s, &phase, SampledSpectrum(0.f)};
+}
+
+PBRT_CPU_GPU HomogeneousMajorantIterator
+FuzzyMedium::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
+    Float maxRou = Density(0.f);
+    Float projectedArea = sggx.Sigma(-ray.d);
+    SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
+    return HomogeneousMajorantIterator(0, tMax, sigma_maj);
+}
+
+std::string FuzzyMedium::ToString() const {
+    return StringPrintf("[ Fuzzy medium ]");
 }
 
 // HomogeneousMedium Method Definitions
@@ -678,6 +720,8 @@ Medium Medium::Create(const std::string &name, const ParameterDictionary &parame
         m = CloudMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "nanovdb") {
         m = NanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
+    } else if (name == "fuzzy") {
+        m = FuzzyMedium::Create(parameters, loc, alloc);
     } else
         ErrorExit(loc, "%s: medium unknown.", name);
 
