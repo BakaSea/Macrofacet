@@ -74,6 +74,15 @@ class RayMajorantIterator
     std::string ToString() const;
 };
 
+struct MediumSample {
+    MediumSample() = default;
+    MediumSample(Point3f p, SampledSpectrum Tr, Float pdf, bool success) : p(p), Tr(Tr), pdf(pdf), success(success) {}
+    SampledSpectrum Tr;
+    Point3f p;
+    Float pdf;
+    bool success;
+};
+
 // Medium Definition
 class Medium
     : public TaggedPointer<  // Medium Types
@@ -103,6 +112,13 @@ class Medium
     // Medium Public Methods
     RayMajorantIterator SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda,
                                   ScratchBuffer &buf) const;
+
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u, const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y, const SampledWavelengths &lambda) const;
+
 };
 
 // MediumInterface Definition

@@ -946,6 +946,280 @@ std::unique_ptr<SimpleVolPathIntegrator> SimpleVolPathIntegrator::Create(
                                                      lights);
 }
 
+SampledSpectrum TrackVolPathIntegrator::Li(RayDifferential ray,
+                                           SampledWavelengths &lambda, Sampler sampler,
+                                           ScratchBuffer &scratchBuffer,
+                                           VisibleSurface *visibleSurface) const {
+    // Declare local variables for _PathIntegrator::Li()_
+    SampledSpectrum L(0.f), beta(1.f);
+    int depth = 0;
+
+    Float p_b, etaScale = 1;
+    bool specularBounce = false, anyNonSpecularBounces = false;
+    LightSampleContext prevIntrCtx;
+
+    // Sample path from camera and accumulate radiance estimate
+    while (true) {
+        // Trace ray and find closest path vertex and its BSDF
+        pstd::optional<ShapeIntersection> si = Intersect(ray);
+
+        if (ray.medium) {
+            //Float tMax = si ? si->tHit : Infinity;
+            Float tMax = si ? si->tHit : 0;
+            MediumSample ms = ray.medium.SampleDistance(ray, tMax, sampler.Get1D(), lambda);
+            CHECK(ms.pdf != 0);
+            beta *= ms.Tr / ms.pdf;
+            if (ms.success) {
+                if (depth++ >= maxDepth) {
+                    return L;
+                }
+                MediumProperties mp = ray.medium.SamplePoint(ms.p, ray.d, lambda);
+                beta *= mp.sigma_s;
+                MediumInteraction intr(ms.p, -ray.d, ray.time, ray.medium, mp.phase);
+                L += beta * SampleLd(intr, nullptr, lambda, sampler);
+
+                // Sample new direction at real-scattering event
+                Point2f u = sampler.Get2D();
+                pstd::optional<PhaseFunctionSample> ps = intr.phase.Sample_p(-ray.d, u);
+                if (!ps || ps->pdf == 0)
+                    return L;
+                else {
+                    // Update ray path state for indirect volume scattering
+                    beta *= ps->p / ps->pdf;
+                    p_b = ps->pdf;
+                    prevIntrCtx = LightSampleContext(intr);
+                    ray.o = ms.p;
+                    ray.d = ps->wi;
+                    specularBounce = false;
+                    anyNonSpecularBounces = true;
+                }
+                continue;
+            }
+        }
+
+        // Add emitted light at intersection point or from the environment
+        if (!si) {
+            // Incorporate emission from infinite lights for escaped ray
+            for (const auto &light : infiniteLights) {
+                SampledSpectrum Le = light.Le(ray, lambda);
+                if (depth == 0 || specularBounce)
+                    L += beta * Le;
+                else {
+                    // Compute MIS weight for infinite light
+                    Float p_l = lightSampler.PMF(prevIntrCtx, light) *
+                                light.PDF_Li(prevIntrCtx, ray.d, true);
+                    Float w_b = PowerHeuristic(1, p_b, 1, p_l);
+
+                    L += beta * w_b * Le;
+                }
+            }
+
+            break;
+        }
+
+        // Incorporate emission from surface hit by ray
+        SampledSpectrum Le = si->intr.Le(-ray.d, lambda);
+        if (Le) {
+            if (depth == 0 || specularBounce)
+                L += beta * Le;
+            else {
+                // Compute MIS weight for area light
+                Light areaLight(si->intr.areaLight);
+                Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) *
+                            areaLight.PDF_Li(prevIntrCtx, ray.d, true);
+                Float w_l = PowerHeuristic(1, p_b, 1, p_l);
+
+                L += beta * w_l * Le;
+            }
+        }
+
+        SurfaceInteraction &isect = si->intr;
+        // Get BSDF and skip over medium boundaries
+        BSDF bsdf = isect.GetBSDF(ray, lambda, camera, scratchBuffer, sampler);
+        if (!bsdf) {
+            isect.SkipIntersection(&ray, si->tHit);
+            continue;
+        }
+
+        // Initialize _visibleSurf_ at first intersection
+        if (depth == 0 && visibleSurface) {
+            // Estimate BSDF's albedo
+            // Define sample arrays _ucRho_ and _uRho_ for reflectance estimate
+            constexpr int nRhoSamples = 16;
+            const Float ucRho[nRhoSamples] = {
+                0.75741637, 0.37870818, 0.7083487, 0.18935409, 0.9149363, 0.35417435,
+                0.5990858,  0.09467703, 0.8578725, 0.45746812, 0.686759,  0.17708716,
+                0.9674518,  0.2995429,  0.5083201, 0.047338516};
+            const Point2f uRho[nRhoSamples] = {
+                Point2f(0.855985, 0.570367), Point2f(0.381823, 0.851844),
+                Point2f(0.285328, 0.764262), Point2f(0.733380, 0.114073),
+                Point2f(0.542663, 0.344465), Point2f(0.127274, 0.414848),
+                Point2f(0.964700, 0.947162), Point2f(0.594089, 0.643463),
+                Point2f(0.095109, 0.170369), Point2f(0.825444, 0.263359),
+                Point2f(0.429467, 0.454469), Point2f(0.244460, 0.816459),
+                Point2f(0.756135, 0.731258), Point2f(0.516165, 0.152852),
+                Point2f(0.180888, 0.214174), Point2f(0.898579, 0.503897)};
+
+            SampledSpectrum albedo = bsdf.rho(isect.wo, ucRho, uRho);
+
+            *visibleSurface = VisibleSurface(isect, albedo, lambda);
+        }
+
+        // Possibly regularize the BSDF
+        if (regularize && anyNonSpecularBounces) {
+            ++regularizedBSDFs;
+            bsdf.Regularize();
+        }
+
+        ++totalBSDFs;
+
+        // End path if maximum depth reached
+        if (depth++ == maxDepth)
+            break;
+
+        // Sample direct illumination from the light sources
+        if (IsNonSpecular(bsdf.Flags())) {
+            ++totalPaths;
+            SampledSpectrum Ld = SampleLd(isect, &bsdf, lambda, sampler);
+            if (!Ld)
+                ++zeroRadiancePaths;
+            L += beta * Ld;
+        }
+
+        // Sample BSDF to get new path direction
+        Vector3f wo = -ray.d;
+        Float u = sampler.Get1D();
+        pstd::optional<BSDFSample> bs = bsdf.Sample_f(wo, u, sampler.Get2D());
+        if (!bs)
+            break;
+        // Update path state variables after surface scattering
+        beta *= bs->f * AbsDot(bs->wi, isect.shading.n) / bs->pdf;
+        p_b = bs->pdfIsProportional ? bsdf.PDF(wo, bs->wi) : bs->pdf;
+        DCHECK(!IsInf(beta.y(lambda)));
+        specularBounce = bs->IsSpecular();
+        anyNonSpecularBounces |= !bs->IsSpecular();
+        if (bs->IsTransmission())
+            etaScale *= Sqr(bs->eta);
+        prevIntrCtx = si->intr;
+
+        ray = isect.SpawnRay(ray, bsdf, bs->wi, bs->flags, bs->eta);
+
+        // Possibly terminate the path with Russian roulette
+        SampledSpectrum rrBeta = beta * etaScale;
+        if (rrBeta.MaxComponentValue() < 1 && depth > 1) {
+            Float q = std::max<Float>(0, 1 - rrBeta.MaxComponentValue());
+            if (sampler.Get1D() < q)
+                break;
+            beta /= 1 - q;
+            DCHECK(!IsInf(beta.y(lambda)));
+        }
+    }
+    pathLength << depth;
+    return L;
+}
+
+SampledSpectrum TrackVolPathIntegrator::SampleLd(const Interaction &intr,
+                                                 const BSDF *bsdf,
+                                                 SampledWavelengths &lambda,
+                                                 Sampler sampler) const {
+    // Estimate light-sampled direct illumination at _intr_
+    // Initialize _LightSampleContext_ for volumetric light sampling
+    LightSampleContext ctx;
+    if (bsdf) {
+        ctx = LightSampleContext(intr.AsSurface());
+        // Try to nudge the light sampling position to correct side of the surface
+        BxDFFlags flags = bsdf->Flags();
+        if (IsReflective(flags) && !IsTransmissive(flags))
+            ctx.pi = intr.OffsetRayOrigin(intr.wo);
+        else if (IsTransmissive(flags) && !IsReflective(flags))
+            ctx.pi = intr.OffsetRayOrigin(-intr.wo);
+
+    } else
+        ctx = LightSampleContext(intr);
+
+    // Sample a light source using _lightSampler_
+    Float u = sampler.Get1D();
+    pstd::optional<SampledLight> sampledLight = lightSampler.Sample(ctx, u);
+    Point2f uLight = sampler.Get2D();
+    if (!sampledLight)
+        return SampledSpectrum(0.f);
+    Light light = sampledLight->light;
+    DCHECK(light && sampledLight->p != 0);
+
+    // Sample a point on the light source
+    pstd::optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+    if (!ls || !ls->L || ls->pdf == 0)
+        return SampledSpectrum(0.f);
+    Float p_l = sampledLight->p * ls->pdf;
+
+    // Evaluate BSDF or phase function for light sample direction
+    Float scatterPDF;
+    SampledSpectrum f_hat;
+    Vector3f wo = intr.wo, wi = ls->wi;
+    if (bsdf) {
+        // Update _f_hat_ and _scatterPDF_ accounting for the BSDF
+        f_hat = bsdf->f(wo, wi) * AbsDot(wi, intr.AsSurface().shading.n);
+        scatterPDF = bsdf->PDF(wo, wi);
+
+    } else {
+        // Update _f_hat_ and _scatterPDF_ accounting for the phase function
+        CHECK(intr.IsMediumInteraction());
+        PhaseFunction phase = intr.AsMedium().phase;
+        f_hat = SampledSpectrum(phase.p(wo, wi));
+        scatterPDF = phase.PDF(wo, wi);
+    }
+    if (!f_hat)
+        return SampledSpectrum(0.f);
+
+    // Declare path state variables for ray to light source
+    Ray lightRay = intr.SpawnRayTo(ls->pLight);
+    SampledSpectrum T_ray(1.f);
+
+    while (lightRay.d != Vector3f(0, 0, 0)) {
+        // Trace ray through media to estimate transmittance
+        pstd::optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
+        // Handle opaque surface along ray's path
+        if (si && si->intr.material)
+            return SampledSpectrum(0.f);
+
+        // Update transmittance for current ray segment
+        if (lightRay.medium) {
+            //Float tMax = si ? si->tHit : (1 - ShadowEpsilon);
+            Float t = si ? si->tHit : 0;
+            SampledSpectrum Tr = lightRay.medium.EvalTransmittance(lightRay.o, lightRay(t), lambda);
+            T_ray *= Tr;
+        }
+
+        // Generate next ray segment or return final transmittance
+        if (!T_ray)
+            return SampledSpectrum(0.f);
+        if (!si)
+            break;
+        lightRay = si->intr.SpawnRayTo(ls->pLight);
+    }
+    // Return path contribution function estimate for direct lighting
+    if (IsDeltaLight(light.Type()))
+        return ls->L * f_hat * T_ray / p_l;
+    else {
+        Float w_l = PowerHeuristic(1, p_l, 1, scatterPDF);
+        return w_l * ls->L * f_hat * T_ray / p_l;
+    }
+}
+
+std::unique_ptr<TrackVolPathIntegrator> TrackVolPathIntegrator::Create(
+    const ParameterDictionary &parameters, Camera camera, Sampler sampler,
+    Primitive aggregate, std::vector<Light> lights, const FileLoc *loc) {
+    int maxDepth = parameters.GetOneInt("maxdepth", 5);
+    std::string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
+    bool regularize = parameters.GetOneBool("regularize", false);
+    return std::make_unique<TrackVolPathIntegrator>(maxDepth, camera, sampler, aggregate,
+                                                    lights, lightStrategy, regularize);
+}
+
+std::string TrackVolPathIntegrator::ToString() const {
+    return "Delta Tracking Volume Path Integrator";
+}
+
 STAT_COUNTER("Integrator/Volume interactions", volumeInteractions);
 STAT_COUNTER("Integrator/Surface interactions", surfaceInteractions);
 
@@ -3667,6 +3941,10 @@ std::unique_ptr<Integrator> Integrator::Create(
     else if (name == "simplevolpath")
         integrator = SimpleVolPathIntegrator::Create(parameters, camera, sampler,
                                                      aggregate, lights, loc);
+    else if (name == "trackvol")
+        integrator = TrackVolPathIntegrator::Create(parameters, camera, sampler,
+                                                    aggregate, lights, loc);
+
     else if (name == "volpath")
         integrator = VolPathIntegrator::Create(parameters, camera, sampler, aggregate,
                                                lights, loc);

@@ -168,7 +168,8 @@ std::string Medium::ToString() const {
 }
 
 FuzzyMedium *FuzzyMedium::Create(const ParameterDictionary &parameters,
-                                 const FileLoc *loc, Allocator alloc) {
+                                 const Transform &renderFromMedium, const FileLoc *loc,
+                                 Allocator alloc) {
     Spectrum albedo = nullptr;
     if (!albedo) {
         albedo =
@@ -179,12 +180,14 @@ FuzzyMedium *FuzzyMedium::Create(const ParameterDictionary &parameters,
     Float k = parameters.GetOneFloat("k", 1.f);
     Float roughness = parameters.GetOneFloat("roughness", 1.f);
     Float sigma = parameters.GetOneFloat("sigma", 1.f/3.f);
-    return alloc.new_object<FuzzyMedium>(albedo, k, roughness, sigma, alloc);
+    return alloc.new_object<FuzzyMedium>(renderFromMedium, albedo, k, roughness, sigma, alloc);
 }
 
 PBRT_CPU_GPU MediumProperties
 FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
-    Float rou = Density(p.z + 2.f);
+    p = renderFromMedium.ApplyInverse(p);
+    wo = renderFromMedium.ApplyInverse(wo);
+    Float rou = Density(p.z);
     Float projectedArea = sggx.Sigma(wo);
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
     SampledSpectrum albedo = albedo_spec.Sample(lambda);
@@ -195,10 +198,67 @@ FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambd
 
 PBRT_CPU_GPU HomogeneousMajorantIterator
 FuzzyMedium::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
+    ray = renderFromMedium.ApplyInverse(ray);
     Float maxRou = Density(0.f);
     Float projectedArea = sggx.Sigma(-ray.d);
     SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
     return HomogeneousMajorantIterator(0, tMax, sigma_maj);
+}
+
+PBRT_CPU_GPU
+MediumSample FuzzyMedium::SampleDistance(Ray ray, Float tMax, Float u,
+                                         const SampledWavelengths &lambda) const {
+    tMax *= Length(ray.d);
+    if (tMax < FLT_EPSILON)
+        return MediumSample(ray.o, SampledSpectrum(1), 1, false);
+    ray.d = Normalize(ray.d);
+    Ray mRay = renderFromMedium.ApplyInverse(ray, &tMax);
+    CHECK(mRay.d.z != 0);
+    Float sv = sigma * sqrtf(2.f);
+    Float erfD0 = erff(mRay.o.z / sv);
+    Float erfStep = -2.f * AbsCosTheta(mRay.d) * logf(1.f - u) / (k * sggx.Sigma(mRay.d));
+    Float erfD1 = erfD0 + copysignf(1.f, CosTheta(mRay.d)) * erfStep;
+    if (erfD1 <= -1.f || erfD1 >= 1.f) {
+        Point3f p = ray(tMax);
+        SampledSpectrum Tr = EvalTransmittance(ray.o, p, lambda);
+        return MediumSample(p, SampledSpectrum(1), 1, false);
+    }
+    Float depth = sv * ErfInv(erfD1);
+    Float t = (depth - mRay.o.z) / mRay.d.z;
+    if (t >= tMax) {
+        Point3f p = ray(tMax);
+        SampledSpectrum Tr = EvalTransmittance(ray.o, p, lambda);
+        return MediumSample(p, SampledSpectrum(1), 1, false);
+    }
+    Point3f p = mRay(t);
+    Point3f rp = ray(t);
+    Float Tr = 1.f - u;
+    Float rou = Density(p.z);
+    Float projectedArea = sggx.Sigma(mRay.d);
+    Float sigma_t = rou * projectedArea;
+    Float pdf = sigma_t * Tr/* * AbsCosTheta(mRay.d)*/;
+    CHECK(!IsNaN(Tr));
+    CHECK(!IsNaN(pdf));
+    CHECK(pdf != 0);
+    return MediumSample(rp, SampledSpectrum(Tr), pdf, true);
+}
+
+PBRT_CPU_GPU
+SampledSpectrum FuzzyMedium::EvalTransmittance(Point3f x, Point3f y,
+                                               const SampledWavelengths &lambda) const {
+    x = renderFromMedium.ApplyInverse(x);
+    y = renderFromMedium.ApplyInverse(y);
+    Float sv = sigma * sqrtf(2.f);
+    Float erfY = erff(y.z / sv), erfX = erff(x.z / sv);
+    Vector3f wi = y - x;
+    if (Length(wi) < FLT_EPSILON)
+        return SampledSpectrum(1.f);
+    wi = Normalize(wi);
+    if (wi.z == 0)
+        return SampledSpectrum(1.f);
+    Float coeff = -k * sggx.Sigma(wi) * fabs(erfY - erfX) / (2.f * AbsCosTheta(wi));
+    CHECK(!IsNaN(FastExp(coeff)));
+    return SampledSpectrum(FastExp(coeff));
 }
 
 std::string FuzzyMedium::ToString() const {
@@ -240,6 +300,43 @@ HomogeneousMedium *HomogeneousMedium::Create(const ParameterDictionary &paramete
 
     return alloc.new_object<HomogeneousMedium>(sig_a, sig_s, sigmaScale, Le, LeScale, g,
                                                alloc);
+}
+
+MediumSample HomogeneousMedium::SampleDistance(Ray ray, Float tMax, Float u,
+                                               const SampledWavelengths &lambda) const {
+    tMax *= Length(ray.d);
+    ray.d = Normalize(ray.d);
+    SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
+    SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
+    SampledSpectrum sigma_t = sigma_a + sigma_s;
+    int channel = std::min((int)(u * NSpectrumSamples), NSpectrumSamples - 1);
+    Float t = -logf(1.f - u) / sigma_t[channel];
+    bool success = true;
+    if (t >= tMax) {
+        t = tMax;
+        success = false;
+    }
+    SampledSpectrum Tr = FastExp(-sigma_t * t);
+    Float pdf = 0;
+    for (int i = 0; i < NSpectrumSamples; ++i) {
+        if (success) {
+            pdf += sigma_t[i] * Tr[i];
+        } else {
+            pdf += Tr[i];
+        }
+    }
+    pdf /= NSpectrumSamples;
+    return MediumSample(ray(t), Tr, pdf, success);
+}
+
+SampledSpectrum HomogeneousMedium::EvalTransmittance(
+    Point3f x, Point3f y, const SampledWavelengths &lambda) const {
+    SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
+    SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
+    SampledSpectrum sigma_t = sigma_a + sigma_s;
+    Float l = Length(y - x);
+    SampledSpectrum Tr = FastExp(-sigma_t * l);
+    return Tr;
 }
 
 std::string HomogeneousMedium::ToString() const {
@@ -721,7 +818,7 @@ Medium Medium::Create(const std::string &name, const ParameterDictionary &parame
     } else if (name == "nanovdb") {
         m = NanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "fuzzy") {
-        m = FuzzyMedium::Create(parameters, loc, alloc);
+        m = FuzzyMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else
         ErrorExit(loc, "%s: medium unknown.", name);
 

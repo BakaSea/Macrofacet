@@ -12,7 +12,7 @@ Film "rgb"
   "integer yresolution" 1080
   "string filename" "sample.exr"
 
-Integrator "volpath"
+Integrator "trackvol"
   "integer maxdepth" 1
 
 WorldBegin
@@ -33,9 +33,12 @@ MakeNamedMedium "sggx1" "string type" "fuzzy" "float sigma" 0.16666667 "float k"
 MakeNamedMedium "sggx2" "string type" "fuzzy" "float sigma" 0.08333334 "float k" 10
 MakeNamedMedium "sggx3" "string type" "fuzzy" "float sigma" 0.01666667 "float k" 10
 
+MakeNamedMedium "homo" "string type" "homogeneous" "rgb sigma_a" [0.2 0.3 0.4] "rgb sigma_s" [0.8 0.7 0.6]
+
 AttributeBegin
 Translate -1.5 0 0
 MediumInterface "sggx1" ""
+#MediumInterface "homo" ""
 Material "interface"
 Shape "plymesh" "string filename" "cube.ply"
 AttributeEnd
@@ -44,6 +47,7 @@ AttributeBegin
 Scale 1 1 0.5
 Translate 0 0 0
 MediumInterface "sggx2" ""
+#MediumInterface "homo" ""
 Material "interface"
 Shape "plymesh" "string filename" "cube.ply"
 AttributeEnd
@@ -52,6 +56,7 @@ AttributeBegin
 Scale 1 1 0.1
 Translate 1.5 0 0
 MediumInterface "sggx3" ""
+#MediumInterface "homo" ""
 Material "interface"
 Shape "plymesh" "string filename" "cube.ply"
 AttributeEnd

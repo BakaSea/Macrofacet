@@ -359,16 +359,17 @@ class FuzzyMedium {
   public:
     using MajorantIterator = HomogeneousMajorantIterator;
 
-    FuzzyMedium(Spectrum albedo, Float k, Float roughness, Float sigma, Allocator alloc)
-        : albedo_spec(albedo, alloc),
+    FuzzyMedium(const Transform &renderFromMedium, Spectrum albedo, Float k,
+                Float roughness, Float sigma, Allocator alloc)
+        : renderFromMedium(renderFromMedium),
+          albedo_spec(albedo, alloc),
           k(k),
           sggx(roughness),
           sigma(sigma),
-          phase(roughness) {
+          phase(roughness) {}
 
-    }
-
-    static FuzzyMedium *Create(const ParameterDictionary &parameters, const FileLoc *loc,
+    static FuzzyMedium *Create(const ParameterDictionary &parameters,
+                               const Transform &renderFromMedium, const FileLoc *loc,
                                Allocator alloc);
 
     PBRT_CPU_GPU
@@ -393,9 +394,17 @@ class FuzzyMedium {
     HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
                                           const SampledWavelengths &lambda) const;
 
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y, const SampledWavelengths &lambda) const;
+
     std::string ToString() const;
 
   private:
+    Transform renderFromMedium;
     DenselySampledSpectrum albedo_spec;
     SGGXPhaseFunction phase;
     SGGX sggx;
@@ -447,6 +456,13 @@ class HomogeneousMedium {
         SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
         return HomogeneousMajorantIterator(0, tMax, sigma_a + sigma_s);
     }
+
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y, const SampledWavelengths &lambda) const;
 
     std::string ToString() const;
 
@@ -537,6 +553,18 @@ class GridMedium {
         return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
     }
 
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
+    }
+
   private:
     // GridMedium Private Members
     Bounds3f bounds;
@@ -621,6 +649,18 @@ class RGBGridMedium {
         return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
     }
 
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
+    }
+
   private:
     // RGBGridMedium Private Members
     Bounds3f bounds;
@@ -698,6 +738,18 @@ class CloudMedium {
         SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
         SampledSpectrum sigma_t = sigma_a + sigma_s;
         return HomogeneousMajorantIterator(tMin, tMax, sigma_t);
+    }
+
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
     }
 
   private:
@@ -868,6 +920,18 @@ class NanoVDBMedium {
         return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
     }
 
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
+    }
+
   private:
     // NanoVDBMedium Private Methods
     PBRT_CPU_GPU
@@ -944,6 +1008,18 @@ inline RayMajorantIterator Medium::SampleRay(Ray ray, Float tMax,
         return RayMajorantIterator(iter);
     };
     return DispatchCPU(sample);
+}
+
+PBRT_CPU_GPU inline MediumSample Medium::SampleDistance(
+    Ray ray, Float tMax, Float u, const SampledWavelengths &lambda) const {
+    auto sample = [&](auto ptr) { return ptr->SampleDistance(ray, tMax, u, lambda); };
+    return Dispatch(sample);
+}
+
+PBRT_CPU_GPU inline SampledSpectrum Medium::EvalTransmittance(
+    Point3f x, Point3f y, const SampledWavelengths &lambda) const {
+    auto eval = [&](auto ptr) { return ptr->EvalTransmittance(x, y, lambda); };
+    return Dispatch(eval);
 }
 
 template <typename F>
