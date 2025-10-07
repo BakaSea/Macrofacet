@@ -1,0 +1,46 @@
+Sampler "halton"
+  "integer pixelsamples" 1024
+LookAt 0 3 1.5
+       0 0 0.5
+       0 0 1
+
+Camera "perspective"
+    "float fov" 60
+
+Film "rgb"
+  "integer xresolution" 512
+  "integer yresolution" 512
+  "string filename" "bunny.exr"
+
+Integrator "volpath"
+  "integer maxdepth" 1
+
+WorldBegin
+
+LightSource "infinite" "rgb L" [ 1 1 1 ]
+
+AttributeBegin
+  Translate 0 0 -10
+  Material "diffuse" "rgb reflectance" [ .4 .45 .35 ]
+  Shape "disk" "float radius" 1000
+AttributeEnd
+
+MakeNamedMedium "homo" "string type" "homogeneous" "rgb sigma_a" [0.2 0.3 0.4] "rgb sigma_s" [0.8 0.7 0.6]
+
+AttributeBegin
+  MakeNamedMedium "sggx" "string type" "fuzzyvdb" 
+    "string filename" "bunny-01.nvdb"
+    "rgb albedo" [ 1 1 1 ]
+  AttributeBegin
+    Material "interface"
+    MediumInterface "sggx" ""
+    #MediumInterface "homo" ""
+    #Material "diffuse"
+    Shape "sphere" "float radius" [ 2 ]
+  AttributeEnd
+AttributeEnd
+
+#AttributeBegin
+#  Material "conductor" "float roughness" 1 "rgb reflectance" [1 1 1]
+#  Shape "plymesh" "string filename" "cube.ply"
+#AttributeEnd

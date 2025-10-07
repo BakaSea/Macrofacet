@@ -167,14 +167,15 @@ struct SGGX {
         Vector3f Mi(inv_sqrtS_ii * S_ki, inv_sqrtS_ii * S_ji, inv_sqrtS_ii * S_ii);
         Vector3f wm_kji = Normalize(u * Mk + v * Mj + w * Mi);
         // rotate back to world basis
-        return wm_kji.x * wk + wm_kji.y * wj + wm_kji.z * wi;
+        return Normalize(wm_kji.x * wk + wm_kji.y * wj + wm_kji.z * wi);
     }
 
-    Vector3f SampleSpecular(const Vector3f wi, Point2f u) const {
+    Vector3f SampleSpecular(Vector3f wi, Point2f u) const {
+        wi = Normalize(wi);
         // sample VNDF
         const Vector3f wm = SampleVNDF(wi, u.x, u.y);
         // specular reflection
-        const Vector3f wo = -wi + 2.0f * wm * Dot(wm, wi);
+        const Vector3f wo = Normalize(Reflect(wi, wm));
         return wo;
     }
 
@@ -376,9 +377,7 @@ class FuzzyMedium {
     bool IsEmissive() const { return false; }
 
     PBRT_CPU_GPU
-    Float Density(Float x) const {
-        return k * Gaussian(x, 0, sigma);
-    }
+    Float Density(Point3f p) const;
 
     PBRT_CPU_GPU
     MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
@@ -959,6 +958,60 @@ class NanoVDBMedium {
     const nanovdb::FloatGrid *densityFloatGrid = nullptr;
     const nanovdb::FloatGrid *temperatureFloatGrid = nullptr;
     Float LeScale, temperatureOffset, temperatureScale;
+};
+
+class FuzzyNanoVDBMedium {
+  public:
+    using MajorantIterator = DDAMajorantIterator;
+
+    static FuzzyNanoVDBMedium *Create(const ParameterDictionary &parameters,
+                                      const Transform &renderFromMedium,
+                                      const FileLoc *loc, Allocator alloc);
+
+    std::string ToString() const;
+
+    FuzzyNanoVDBMedium(const Transform &renderFromMedium, Spectrum albedo, Float k,
+                       Float roughness, nanovdb::GridHandle<NanoVDBBuffer> dg,
+                       Allocator alloc);
+
+    PBRT_CPU_GPU
+    bool IsEmissive() const { return false; }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
+        Error("SamplePoint No implement!");
+        return MediumProperties{};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    DDAMajorantIterator SampleRay(Ray ray, Float raytMax,
+                                  const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
+    }
+
+  private:
+    Bounds3f bounds;
+    Transform renderFromMedium;
+    DenselySampledSpectrum albedo_spec;
+    SGGXPhaseFunction phase;
+    MajorantGrid majorantGrid;
+    nanovdb::GridHandle<NanoVDBBuffer> densityGrid;
+    const nanovdb::FloatGrid *densityFloatGrid = nullptr;
+    Float k;
 };
 
 PBRT_CPU_GPU inline Float PhaseFunction::p(Vector3f wo, Vector3f wi) const {

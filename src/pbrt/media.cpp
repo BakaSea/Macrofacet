@@ -183,11 +183,19 @@ FuzzyMedium *FuzzyMedium::Create(const ParameterDictionary &parameters,
     return alloc.new_object<FuzzyMedium>(renderFromMedium, albedo, k, roughness, sigma, alloc);
 }
 
+PBRT_CPU_GPU
+Float FuzzyMedium::Density(Point3f p) const {
+    Float d = p.z;
+    Float pdf = Gaussian(d, 0.f, sigma);
+    Float cdf = 0.5f * (1.f + erf(d / (sigma * std::sqrt(2.f))));
+    return k * pdf / cdf;
+}
+
 PBRT_CPU_GPU MediumProperties
 FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
     p = renderFromMedium.ApplyInverse(p);
     wo = renderFromMedium.ApplyInverse(wo);
-    Float rou = Density(p.z);
+    Float rou = Density(p);
     Float projectedArea = sggx.Sigma(wo);
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
     SampledSpectrum albedo = albedo_spec.Sample(lambda);
@@ -199,7 +207,7 @@ FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambd
 PBRT_CPU_GPU HomogeneousMajorantIterator
 FuzzyMedium::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
     ray = renderFromMedium.ApplyInverse(ray);
-    Float maxRou = Density(0.f);
+    Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
     Float projectedArea = sggx.Sigma(-ray.d);
     SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
     return HomogeneousMajorantIterator(0, tMax, sigma_maj);
@@ -233,7 +241,7 @@ MediumSample FuzzyMedium::SampleDistance(Ray ray, Float tMax, Float u,
     Point3f p = mRay(t);
     Point3f rp = ray(t);
     Float Tr = 1.f - u;
-    Float rou = Density(p.z);
+    Float rou = Density(p);
     Float projectedArea = sggx.Sigma(mRay.d);
     Float sigma_t = rou * projectedArea;
     Float pdf = sigma_t * Tr/* * AbsCosTheta(mRay.d)*/;
@@ -302,6 +310,7 @@ HomogeneousMedium *HomogeneousMedium::Create(const ParameterDictionary &paramete
                                                alloc);
 }
 
+PBRT_CPU_GPU
 MediumSample HomogeneousMedium::SampleDistance(Ray ray, Float tMax, Float u,
                                                const SampledWavelengths &lambda) const {
     tMax *= Length(ray.d);
@@ -329,6 +338,7 @@ MediumSample HomogeneousMedium::SampleDistance(Ray ray, Float tMax, Float u,
     return MediumSample(ray(t), Tr, pdf, success);
 }
 
+PBRT_CPU_GPU
 SampledSpectrum HomogeneousMedium::EvalTransmittance(
     Point3f x, Point3f y, const SampledWavelengths &lambda) const {
     SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
@@ -803,6 +813,152 @@ NanoVDBMedium *NanoVDBMedium::Create(const ParameterDictionary &parameters,
         std::move(temperatureGrid), LeScale, temperatureOffset, temperatureScale, alloc);
 }
 
+
+FuzzyNanoVDBMedium::FuzzyNanoVDBMedium(const Transform &renderFromMedium, Spectrum albedo,
+                                       Float k, Float roughness,
+                                       nanovdb::GridHandle<NanoVDBBuffer> dg,
+                                       Allocator alloc)
+    : renderFromMedium(renderFromMedium),
+      albedo_spec(albedo),
+      k(k),
+      phase(roughness),
+      majorantGrid(Bounds3f(), {64, 64, 64}, alloc),
+      densityGrid(std::move(dg)) {
+    densityFloatGrid = densityGrid.grid<float>();
+    nanovdb::BBox<nanovdb::Vec3R> bbox = densityFloatGrid->worldBBox();
+    bounds = Bounds3f(Point3f(bbox.min()[0], bbox.min()[1], bbox.min()[2]),
+                      Point3f(bbox.max()[0], bbox.max()[1], bbox.max()[2]));
+    majorantGrid.bounds = bounds;
+
+    LOG_VERBOSE("Starting nanovdb grid GetMaxDensityGrid()");
+
+    int gridSize = majorantGrid.res.x * majorantGrid.res.y * majorantGrid.res.z;
+    ParallelFor(0, gridSize, [&](size_t index) {
+        // Indices into majorantGrid
+        int x = index % majorantGrid.res.x;
+        int y = (index / majorantGrid.res.x) % majorantGrid.res.y;
+        int z = index / (majorantGrid.res.x * majorantGrid.res.y);
+        CHECK_EQ(index, x + majorantGrid.res.x * (y + majorantGrid.res.y * z));
+
+        // World (aka medium) space bounds of this max grid cell
+        Bounds3f wb(bounds.Lerp(Point3f(Float(x) / majorantGrid.res.x,
+                                        Float(y) / majorantGrid.res.y,
+                                        Float(z) / majorantGrid.res.z)),
+                    bounds.Lerp(Point3f(Float(x + 1) / majorantGrid.res.x,
+                                        Float(y + 1) / majorantGrid.res.y,
+                                        Float(z + 1) / majorantGrid.res.z)));
+
+        // Compute corresponding NanoVDB index-space bounds in floating-point.
+        nanovdb::Vec3R i0 = densityFloatGrid->worldToIndexF(
+            nanovdb::Vec3R(wb.pMin.x, wb.pMin.y, wb.pMin.z));
+        nanovdb::Vec3R i1 = densityFloatGrid->worldToIndexF(
+            nanovdb::Vec3R(wb.pMax.x, wb.pMax.y, wb.pMax.z));
+
+        // Now find integer index-space bounds, accounting for both
+        // filtering and the overall index bounding box.
+        auto bbox = densityFloatGrid->indexBBox();
+        Float delta = 1.f;  // Filter slop
+        int nx0 = std::max(int(i0[0] - delta), bbox.min()[0]);
+        int nx1 = std::min(int(i1[0] + delta), bbox.max()[0]);
+        int ny0 = std::max(int(i0[1] - delta), bbox.min()[1]);
+        int ny1 = std::min(int(i1[1] + delta), bbox.max()[1]);
+        int nz0 = std::max(int(i0[2] - delta), bbox.min()[2]);
+        int nz1 = std::min(int(i1[2] + delta), bbox.max()[2]);
+
+        // FIXME: While the following is properly conservative, it can lead
+        // to voxels with majorants that are much higher than any actual
+        // volume density value in their extent. The issue comes up when
+        // a) the density at a sample outside the is much higher than in the
+        // voxel's interior and b) that sample only has a minimal
+        // contribution in practice due to trilinear interpolation.  We
+        // compute a majorant as if it might fully contribute, even though
+        // it can't.  Fixing this would require careful handling of the
+        // boundary samples.  The impact of these majorants is not
+        // insignificant; they cause a roughly 10% slowdown in practice
+        // due to excess null scattering in such voxels.
+        float maxValue = 0;
+        auto accessor = densityFloatGrid->getAccessor();
+        // Apparently nanovdb integer bounding boxes are inclusive on
+        // the upper end...
+        for (int nz = nz0; nz <= nz1; ++nz)
+            for (int ny = ny0; ny <= ny1; ++ny)
+                for (int nx = nx0; nx <= nx1; ++nx)
+                    maxValue = std::max(maxValue, accessor.getValue({nx, ny, nz}));
+
+        // Only write into maxGrid once when we're done to minimize
+        // cache thrashing..
+        majorantGrid.Set(x, y, z, maxValue);
+    });
+
+    LOG_VERBOSE("Finished nanovdb grid GetMaxDensityGrid()");
+}
+
+PBRT_CPU_GPU
+MediumProperties FuzzyNanoVDBMedium::SamplePoint(Point3f p, Vector3f wo,
+                                                 const SampledWavelengths &lambda) const {
+    p = renderFromMedium.ApplyInverse(p);
+    wo = renderFromMedium.ApplyInverse(wo);
+
+    nanovdb::Vec3<float> pIndex =
+        densityFloatGrid->worldToIndexF(nanovdb::Vec3<float>(p.x, p.y, p.z));
+    using Sampler = nanovdb::SampleFromVoxels<nanovdb::FloatGrid::TreeType, 1, false>;
+    Float rou = Sampler(densityFloatGrid->tree())(pIndex);
+
+    SGGX sggx(1.f);
+
+    Float projectedArea = sggx.Sigma(wo);
+    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
+    SampledSpectrum albedo = albedo_spec.Sample(lambda);
+    SampledSpectrum sigma_s = albedo * sigma_t;
+    SampledSpectrum sigma_a = sigma_t - sigma_s;
+    return MediumProperties{sigma_a, sigma_s, &phase, SampledSpectrum(0.f)};
+}
+
+PBRT_CPU_GPU
+DDAMajorantIterator FuzzyNanoVDBMedium::SampleRay(Ray ray, Float raytMax, const SampledWavelengths& lambda) const {
+    // Transform ray to medium's space and compute bounds overlap
+    ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+    Float tMin, tMax;
+    if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
+        return {};
+    DCHECK_LE(tMax, raytMax);
+
+    SGGX sggx(1.f);
+
+    SampledSpectrum sigma_t = SampledSpectrum(sggx.Sigma(-ray.d));
+
+    return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
+}
+
+std::string FuzzyNanoVDBMedium::ToString() const {
+    return StringPrintf("[ FuzzyNanoVDBMedium ]");
+}
+
+FuzzyNanoVDBMedium *FuzzyNanoVDBMedium::Create(const ParameterDictionary &parameters,
+                                               const Transform &renderFromMedium,
+                                               const FileLoc *loc, Allocator alloc) {
+    std::string filename = ResolveFilename(parameters.GetOneString("filename", ""));
+    if (filename.empty())
+        ErrorExit(loc, "Must supply \"filename\" to \"nanovdb\" medium.");
+
+    nanovdb::GridHandle<NanoVDBBuffer> densityGrid;
+    std::string gridname = parameters.GetOneString("gridname", "density");
+    densityGrid = readGrid<NanoVDBBuffer>(filename, gridname, loc, alloc);
+    if (!densityGrid)
+        ErrorExit(loc, "%s: didn't find \"density\" grid.", filename);
+
+    Float k = parameters.GetOneFloat("k", 1.f);
+    Float roughness = parameters.GetOneFloat("roughness", 1.f);
+
+    Spectrum albedo =
+        parameters.GetOneSpectrum("albedo", nullptr, SpectrumType::Unbounded, alloc);
+    if (!albedo)
+        albedo = alloc.new_object<ConstantSpectrum>(1.f);
+
+    return alloc.new_object<FuzzyNanoVDBMedium>(renderFromMedium, albedo, k, roughness,
+                                                std::move(densityGrid), alloc);
+}
+
 Medium Medium::Create(const std::string &name, const ParameterDictionary &parameters,
                       const Transform &renderFromMedium, const FileLoc *loc,
                       Allocator alloc) {
@@ -819,6 +975,8 @@ Medium Medium::Create(const std::string &name, const ParameterDictionary &parame
         m = NanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "fuzzy") {
         m = FuzzyMedium::Create(parameters, renderFromMedium, loc, alloc);
+    } else if (name == "fuzzyvdb") {
+        m = FuzzyNanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else
         ErrorExit(loc, "%s: medium unknown.", name);
 

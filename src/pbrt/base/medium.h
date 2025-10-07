@@ -49,6 +49,7 @@ class GridMedium;
 class RGBGridMedium;
 class CloudMedium;
 class NanoVDBMedium;
+class FuzzyNanoVDBMedium;
 
 struct MediumProperties;
 
@@ -86,7 +87,7 @@ struct MediumSample {
 // Medium Definition
 class Medium
     : public TaggedPointer<  // Medium Types
-          FuzzyMedium, HomogeneousMedium, GridMedium, RGBGridMedium, CloudMedium, NanoVDBMedium
+          FuzzyMedium, HomogeneousMedium, GridMedium, RGBGridMedium, CloudMedium, NanoVDBMedium, FuzzyNanoVDBMedium
 
           > {
   public:

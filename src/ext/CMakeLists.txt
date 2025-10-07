@@ -155,6 +155,20 @@ add_subdirectory (utf8proc)
 set (QOI_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/qoi PARENT_SCOPE)
 
 ###########################################################################
+# eigen
+
+set (EIGEN_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/eigen PARENT_SCOPE)
+
+add_subdirectory (eigen)
+
+###########################################################################
+# igl
+
+set (IGL_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/libigl/include PARENT_SCOPE)
+
+add_subdirectory (libigl)
+
+###########################################################################
 # glfw / glad
 
 set (GLFW_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include PARENT_SCOPE)

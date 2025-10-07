@@ -1044,6 +1044,23 @@ if (TARGET Ptex_static AND TARGET zlibstatic)
 endif()
 
 ######################
+# fuzzy_volume_generator
+
+add_executable (fuzzy_volume_generator src/pbrt/cmd/fuzzy_volume_generator.cpp)
+add_executable (pbrt::fuzzy_volume_generator ALIAS fuzzy_volume_generator)
+
+target_compile_definitions (fuzzy_volume_generator PRIVATE ${PBRT_DEFINITIONS})
+target_compile_options (fuzzy_volume_generator PUBLIC ${PBRT_CXX_FLAGS})
+target_include_directories (fuzzy_volume_generator PUBLIC src src/ext ${EIGEN_INCLUDE} ${IGL_INCLUDE})
+target_link_libraries (fuzzy_volume_generator PRIVATE ${ALL_PBRT_LIBS} pbrt_warnings pbrt_opt Eigen3::Eigen igl::core)
+
+set_target_properties (fuzzy_volume_generator PROPERTIES OUTPUT_NAME fuzzy_volume_generator)
+
+add_sanitizers (fuzzy_volume_generator)
+
+set_property (TARGET fuzzy_volume_generator PROPERTY FOLDER "cmd")
+
+######################
 # cyhair2pbrt
 
 add_executable (cyhair2pbrt src/pbrt/cmd/cyhair2pbrt.cpp)
