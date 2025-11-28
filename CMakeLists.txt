@@ -1044,21 +1044,21 @@ if (TARGET Ptex_static AND TARGET zlibstatic)
 endif()
 
 ######################
-# fuzzy_volume_generator
+# macrofacet_vdb_generator
 
-add_executable (fuzzy_volume_generator src/pbrt/cmd/fuzzy_volume_generator.cpp)
-add_executable (pbrt::fuzzy_volume_generator ALIAS fuzzy_volume_generator)
+add_executable (macrofcaet_vdb_generator src/pbrt/cmd/macrofcaet_vdb_generator.cpp)
+add_executable (pbrt::macrofcaet_vdb_generator ALIAS macrofcaet_vdb_generator)
 
-target_compile_definitions (fuzzy_volume_generator PRIVATE ${PBRT_DEFINITIONS})
-target_compile_options (fuzzy_volume_generator PUBLIC ${PBRT_CXX_FLAGS})
-target_include_directories (fuzzy_volume_generator PUBLIC src src/ext ${EIGEN_INCLUDE} ${IGL_INCLUDE})
-target_link_libraries (fuzzy_volume_generator PRIVATE ${ALL_PBRT_LIBS} pbrt_warnings pbrt_opt Eigen3::Eigen igl::core)
+target_compile_definitions (macrofcaet_vdb_generator PRIVATE ${PBRT_DEFINITIONS})
+target_compile_options (macrofcaet_vdb_generator PUBLIC ${PBRT_CXX_FLAGS})
+target_include_directories (macrofcaet_vdb_generator PUBLIC src src/ext ${EIGEN_INCLUDE} ${IGL_INCLUDE})
+target_link_libraries (macrofcaet_vdb_generator PRIVATE ${ALL_PBRT_LIBS} pbrt_warnings pbrt_opt Eigen3::Eigen igl::core)
 
-set_target_properties (fuzzy_volume_generator PROPERTIES OUTPUT_NAME fuzzy_volume_generator)
+set_target_properties (macrofcaet_vdb_generator PROPERTIES OUTPUT_NAME macrofcaet_vdb_generator)
 
-add_sanitizers (fuzzy_volume_generator)
+add_sanitizers (macrofcaet_vdb_generator)
 
-set_property (TARGET fuzzy_volume_generator PROPERTY FOLDER "cmd")
+set_property (TARGET macrofcaet_vdb_generator PROPERTY FOLDER "cmd")
 
 ######################
 # cyhair2pbrt

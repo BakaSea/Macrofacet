@@ -1,8 +1,8 @@
 Sampler "halton"
-  "integer pixelsamples" 1024
-LookAt 0 3 1.5
-       0 0 0.5
-       0 0 1
+  "integer pixelsamples" 16
+LookAt 0 0 6
+       0 0 0
+       0 1 0
 
 Camera "perspective"
     "float fov" 60
@@ -13,34 +13,74 @@ Film "rgb"
   "string filename" "bunny.exr"
 
 Integrator "volpath"
-  "integer maxdepth" 1
+  #"integer maxdepth" 1
 
 WorldBegin
 
-LightSource "infinite" "rgb L" [ 1 1 1 ]
+#LightSource "infinite" "rgb L" [ 1 1 1 ]
 
 AttributeBegin
-  Translate 0 0 -10
-  Material "diffuse" "rgb reflectance" [ .4 .45 .35 ]
-  Shape "disk" "float radius" 1000
+  Translate 5 0 0
+  Rotate 90 0 0 1
+  Scale 5 5 5
+  Material "diffuse" "rgb reflectance" [ 0.9 0.1 0.1 ]
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
 AttributeEnd
 
-MakeNamedMedium "homo" "string type" "homogeneous" "rgb sigma_a" [0.2 0.3 0.4] "rgb sigma_s" [0.8 0.7 0.6]
+AttributeBegin
+  Translate 0 0 -5
+  Rotate 90 1 0 0
+  Scale 5 5 5
+  Material "diffuse" "rgb reflectance" [ 0.1 0.9 0.1 ]
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
 
 AttributeBegin
-  MakeNamedMedium "sggx" "string type" "fuzzyvdb" 
+  Translate -5 0 0
+  Rotate 90 0 0 1
+  Scale 5 5 5
+  Material "diffuse" "rgb reflectance" [ 0.1 0.1 0.9 ]
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
+
+AttributeBegin
+  Translate 0 -5 0
+  Scale 5 5 5
+  Material "diffuse" "rgb reflectance" [ 0.7 0.7 0.7 ]
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
+
+AttributeBegin
+  Translate 0 5 0
+  Scale 5 5 5
+  Material "diffuse" "rgb reflectance" [ 0.7 0.7 0.7 ]
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
+
+AttributeBegin
+  Translate 0 4.95 0
+  Scale 2 2 2
+  AreaLightSource "diffuse" "rgb L" [ 1 1 1 ] "float scale" 3
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
+
+AttributeBegin
+  Rotate 180 0 1 0
+  Scale 1 1 1
+  MakeNamedMedium "macrofacet" "string type" "macrofacetvdb" 
     "string filename" "bunny-01.nvdb"
     "rgb albedo" [ 1 1 1 ]
   AttributeBegin
     Material "interface"
-    MediumInterface "sggx" ""
-    #MediumInterface "homo" ""
-    #Material "diffuse"
+    MediumInterface "macrofacet" ""
+    #Material "conductor" "rgb reflectance" [1 1 1] "float roughness" 0.25
     Shape "sphere" "float radius" [ 2 ]
+    #Shape "plymesh" "string filename" "bunny.ply"
   AttributeEnd
 AttributeEnd
-
-#AttributeBegin
-#  Material "conductor" "float roughness" 1 "rgb reflectance" [1 1 1]
-#  Shape "plymesh" "string filename" "cube.ply"
-#AttributeEnd

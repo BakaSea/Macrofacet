@@ -212,6 +212,51 @@ class SGGXPhaseFunction {
     SGGX sggx;
 };
 
+class SpecularPhaseFunction {
+  public:
+    SpecularPhaseFunction() = default;
+    PBRT_CPU_GPU
+    SpecularPhaseFunction(const BeckmanDistribution &distrib, const Frame &frame)
+        : distrib(distrib), frame(frame) {}
+
+    PBRT_CPU_GPU
+    Float p(Vector3f wo, Vector3f wi) const {
+        wo = frame.ToLocal(wo);
+        wi = frame.ToLocal(wi);
+        // half vector
+        const Vector3f wh = Normalize(wi + wo);
+        if (wh.z < 0.0f)
+            return 0.0f;
+
+        // value
+        const Float value = 0.25f * distrib.D_wi(wo, wh) / Dot(wo, wh);
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
+        Vector3f localWo = frame.ToLocal(wo);
+        Vector3f wm = distrib.Sample_wm(localWo, u);
+
+        // reflect
+        Vector3f localWi = -localWo + 2.0f * wm * Dot(localWo, wm);
+        Vector3f wi = frame.FromLocal(localWi);
+        Float pdf = p(wo, wi);
+        return PhaseFunctionSample{pdf, wi, pdf};
+    }
+
+    PBRT_CPU_GPU
+    Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi); }
+
+    static const char *Name() { return "Specular"; }
+
+    std::string ToString() const;
+
+  private:
+    BeckmanDistribution distrib;
+    Frame frame;
+};
+
 // MediumProperties Definition
 struct MediumProperties {
     SampledSpectrum sigma_a, sigma_s;
@@ -408,6 +453,70 @@ class FuzzyMedium {
     SGGXPhaseFunction phase;
     SGGX sggx;
     Float k, sigma;
+};
+
+class SphereMacrofacet {
+  public:
+    using MajorantIterator = HomogeneousMajorantIterator;
+
+    SphereMacrofacet(const Transform &renderFromMedium, Spectrum albedo, Float k,
+                     Float sigma, Float radius, BeckmanDistribution ndf, Allocator alloc)
+        : renderFromMedium(renderFromMedium),
+          albedo_spec(albedo, alloc),
+          k(k),
+          sigma(sigma),
+          radius(radius),
+          ndf(ndf),
+          alloc(alloc) {}
+
+    static SphereMacrofacet *Create(const ParameterDictionary &parameters,
+                                    const Transform &renderFromMedium, const FileLoc *loc,
+                                    Allocator alloc);
+
+    PBRT_CPU_GPU
+    bool IsEmissive() const { return false; }
+
+    PBRT_CPU_GPU
+    Float Density(Point3f p) const;
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
+        Error("SamplePoint No implement!");
+        return MediumProperties{};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
+                                          const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
+    }
+
+    std::string ToString() const;
+
+  private:
+
+    PBRT_CPU_GPU
+    Normal3f Normal(Point3f p) const;
+
+    Transform renderFromMedium;
+    DenselySampledSpectrum albedo_spec;
+    BeckmanDistribution ndf;
+    Float k, sigma, radius;
+    Allocator alloc;
 };
 
 // HomogeneousMedium Definition
@@ -960,19 +1069,20 @@ class NanoVDBMedium {
     Float LeScale, temperatureOffset, temperatureScale;
 };
 
-class FuzzyNanoVDBMedium {
+class MacrofacetVDBMedium {
   public:
     using MajorantIterator = DDAMajorantIterator;
 
-    static FuzzyNanoVDBMedium *Create(const ParameterDictionary &parameters,
-                                      const Transform &renderFromMedium,
-                                      const FileLoc *loc, Allocator alloc);
+    static MacrofacetVDBMedium *Create(const ParameterDictionary &parameters,
+                                       const Transform &renderFromMedium,
+                                       const FileLoc *loc, Allocator alloc);
 
     std::string ToString() const;
 
-    FuzzyNanoVDBMedium(const Transform &renderFromMedium, Spectrum albedo, Float k,
-                       Float roughness, nanovdb::GridHandle<NanoVDBBuffer> dg,
-                       Allocator alloc);
+    MacrofacetVDBMedium(const Transform &renderFromMedium, Spectrum albedo,
+                        nanovdb::GridHandle<NanoVDBBuffer> dg,
+                        nanovdb::GridHandle<NanoVDBBuffer> ag,
+                        nanovdb::GridHandle<NanoVDBBuffer> sg, Allocator alloc);
 
     PBRT_CPU_GPU
     bool IsEmissive() const { return false; }
@@ -1007,11 +1117,13 @@ class FuzzyNanoVDBMedium {
     Bounds3f bounds;
     Transform renderFromMedium;
     DenselySampledSpectrum albedo_spec;
-    SGGXPhaseFunction phase;
     MajorantGrid majorantGrid;
     nanovdb::GridHandle<NanoVDBBuffer> densityGrid;
+    nanovdb::GridHandle<NanoVDBBuffer> alphaGrid;
+    nanovdb::GridHandle<NanoVDBBuffer> sdfGrid;
     const nanovdb::FloatGrid *densityFloatGrid = nullptr;
-    Float k;
+    const nanovdb::FloatGrid *alphaFloatGrid = nullptr;
+    const nanovdb::FloatGrid *sdfFloatGrid = nullptr;
 };
 
 PBRT_CPU_GPU inline Float PhaseFunction::p(Vector3f wo, Vector3f wi) const {
@@ -1128,13 +1240,15 @@ PBRT_CPU_GPU SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, RNG &rng,
                 PBRT_DBG("t < seg->tMax\n");
                 T_maj *= FastExp(-(t - tMin) * seg->sigma_maj);
                 //MediumProperties mp = medium->SamplePoint(ray(t), lambda);
-                MediumProperties mp = medium->SamplePoint(ray(t), -ray.d, lambda);
+                MediumProperties mp = medium->SamplePoint(ray(t), ray.d, lambda);
                 if (!callback(ray(t), mp, seg->sigma_maj, T_maj)) {
                     // Returning out of doubly-nested while loop is not as good perf. wise
                     // on the GPU vs using "done" here.
                     done = true;
+                    delete mp.phase.Cast<SpecularPhaseFunction>();
                     break;
                 }
+                delete mp.phase.Cast<SpecularPhaseFunction>();
                 T_maj = SampledSpectrum(1.f);
                 tMin = t;
 

@@ -27,8 +27,10 @@ struct PhaseFunctionSample {
 // PhaseFunction Definition
 class HGPhaseFunction;
 class SGGXPhaseFunction;
+class SpecularPhaseFunction;
 
-class PhaseFunction : public TaggedPointer<HGPhaseFunction, SGGXPhaseFunction> {
+class PhaseFunction
+    : public TaggedPointer<HGPhaseFunction, SGGXPhaseFunction, SpecularPhaseFunction> {
   public:
     // PhaseFunction Interface
     using TaggedPointer::TaggedPointer;
@@ -44,12 +46,13 @@ class PhaseFunction : public TaggedPointer<HGPhaseFunction, SGGXPhaseFunction> {
 };
 
 class FuzzyMedium;
+class SphereMacrofacet;
 class HomogeneousMedium;
 class GridMedium;
 class RGBGridMedium;
 class CloudMedium;
 class NanoVDBMedium;
-class FuzzyNanoVDBMedium;
+class MacrofacetVDBMedium;
 
 struct MediumProperties;
 
@@ -87,7 +90,8 @@ struct MediumSample {
 // Medium Definition
 class Medium
     : public TaggedPointer<  // Medium Types
-          FuzzyMedium, HomogeneousMedium, GridMedium, RGBGridMedium, CloudMedium, NanoVDBMedium, FuzzyNanoVDBMedium
+                   FuzzyMedium, SphereMacrofacet, HomogeneousMedium, GridMedium,
+                   RGBGridMedium, CloudMedium, NanoVDBMedium, MacrofacetVDBMedium
 
           > {
   public:

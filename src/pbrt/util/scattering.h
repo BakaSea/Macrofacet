@@ -209,6 +209,211 @@ class TrowbridgeReitzDistribution {
     Float alpha_x, alpha_y;
 };
 
+class BeckmanDistribution {
+  public:
+    BeckmanDistribution() = default;
+    PBRT_CPU_GPU
+    BeckmanDistribution(Float ax, Float ay) : alpha_x(ax), alpha_y(ay) {
+        if (!EffectivelySmooth()) {
+            alpha_x = std::max<Float>(alpha_x, 1e-4f);
+            alpha_y = std::max<Float>(alpha_y, 1e-4f);
+        }
+    }
+
+    PBRT_CPU_GPU
+    bool EffectivelySmooth() const { return std::max(alpha_x, alpha_y) < 1e-3f; }
+
+    PBRT_CPU_GPU inline Float D(Vector3f wm) const {
+        if (wm.z <= 0.0f)
+            return 0.0f;
+
+        // slope of wm
+        const Float slope_x = -wm.x / wm.z;
+        const Float slope_y = -wm.y / wm.z;
+
+        // value
+        const Float value = P22(slope_x, slope_y) / (wm.z * wm.z * wm.z * wm.z);
+        return value;
+    }
+
+    PBRT_CPU_GPU inline Float D_wi(Vector3f wi, Vector3f wm) const {
+        if (wm.z <= 0.0f)
+            return 0.0f;
+
+        // normalization coefficient
+        const Float projectedarea = projectedArea(wi);
+        if (projectedarea == 0)
+            return 0;
+        const Float c = 1.0f / projectedarea;
+
+        // value
+        const Float value = c * std::max(0.0f, Dot(wi, wm)) * D(wm);
+        return value;
+    }
+
+    PBRT_CPU_GPU inline Float P22(Float slope_x, Float slope_y) const {
+        const Float value = 1.0f / (Pi * alpha_x * alpha_y) *
+                            expf(-slope_x * slope_x / (alpha_x * alpha_x) -
+                                 slope_y * slope_y / (alpha_y * alpha_y));
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    Float alpha_i(Vector3f wi) const {
+        const Float invSinTheta2 = 1.0f / (1.0f - wi.z * wi.z);
+        const Float cosPhi2 = wi.x * wi.x * invSinTheta2;
+        const Float sinPhi2 = wi.y * wi.y * invSinTheta2;
+        const Float alpha_i =
+            sqrtf(cosPhi2 * alpha_x * alpha_x + sinPhi2 * alpha_y * alpha_y);
+        return alpha_i;
+    }
+
+    PBRT_CPU_GPU
+    Float Lambda(Vector3f wi) const {
+        if (wi.z > 0.9999f)
+            return 0.0f;
+        if (wi.z < -0.9999f)
+            return -1.0f;
+
+        // a
+        const Float theta_i = acosf(wi.z);
+        const Float a = 1.0f / tanf(theta_i) / alpha_i(wi);
+
+        // value
+        const Float value =
+            0.5f * ((float)erf(a) - 1.0f) + 1.0f / (2.f * a * sqrtf(Pi)) * expf(-a * a);
+
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    Float projectedArea(Vector3f wi) const {
+        if (wi.z > 0.9999f)
+            return 1.0f;
+        if (wi.z < -0.9999f)
+            return 0.0f;
+
+        // a
+        const Float alphai = alpha_i(wi);
+        const Float theta_i = acosf(wi.z);
+        const Float a = 1.0f / tanf(theta_i) / alphai;
+
+        // value
+        const Float value =
+            0.5f * ((float)erf(a) + 1.0f) * wi.z +
+            1.f / (2.f * sqrtf(Pi)) * alphai * sinf(theta_i) * expf(-a * a);
+
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    Vector3f Sample_wm(Vector3f wi, Point2f u) const {
+        // stretch to match configuration with alpha=1.0
+        const Vector3f wi_11 = Normalize(Vector3f(alpha_x * wi.x, alpha_y * wi.y, wi.z));
+
+        // sample visible slope with alpha=1.0
+        Vector2f slope_11 = sampleP22_11(acosf(wi_11.z), u.x, u.y);
+
+        // align with view direction
+        const float phi = atan2(wi_11.y, wi_11.x);
+        Vector2f slope(cosf(phi) * slope_11.x - sinf(phi) * slope_11.y,
+                       sinf(phi) * slope_11.x + cos(phi) * slope_11.y);
+
+        // stretch back
+        slope.x *= alpha_x;
+        slope.y *= alpha_y;
+
+        // if numerical instability
+        if ((slope.x != slope.x) || !IsFinite(slope.x)) {
+            if (wi.z > 0)
+                return Vector3f(0.0f, 0.0f, 1.0f);
+            else
+                return Normalize(Vector3f(wi.x, wi.y, 0.0f));
+        }
+
+        // compute normal
+        const Vector3f wm = Normalize(Vector3f(-slope.x, -slope.y, 1.0f));
+        return wm;
+    }
+
+    PBRT_CPU_GPU
+    Vector2f sampleP22_11(Float theta_i, Float U, Float U_2) const {
+        Vector2f slope;
+
+        if (theta_i < 0.0001f) {
+            const float r = sqrtf(-logf(U));
+            const float phi = 6.28318530718f * U_2;
+            slope.x = r * cosf(phi);
+            slope.y = r * sinf(phi);
+            return slope;
+        }
+
+        // constant
+        const float sin_theta_i = sinf(theta_i);
+        const float cos_theta_i = cosf(theta_i);
+
+        // slope associated to theta_i
+        const float slope_i = cos_theta_i / sin_theta_i;
+
+        // projected area
+        const float a = cos_theta_i / sin_theta_i;
+        const float projectedarea = 0.5f * ((float)erf(a) + 1.0f) * cos_theta_i +
+                                    1.f / (2.f * sqrtf(Pi)) * sin_theta_i * expf(-a * a);
+        if (projectedarea < 0.0001f || projectedarea != projectedarea)
+            return Vector2f(0, 0);
+        // VNDF normalization factor
+        const float c = 1.0f / projectedarea;
+
+        // search
+        float erf_min = -0.9999f;
+        float erf_max = std::max(erf_min, (float)erf(slope_i));
+        float erf_current = 0.5f * (erf_min + erf_max);
+
+        while (erf_max - erf_min > 0.00001f) {
+            if (!(erf_current >= erf_min && erf_current <= erf_max))
+                erf_current = 0.5f * (erf_min + erf_max);
+
+            // evaluate slope
+            const float slope = ErfInv(erf_current);
+
+            // CDF
+            const float CDF =
+                (slope >= slope_i)
+                    ? 1.0f
+                    : c * (1.f / (2.f * sqrtf(Pi)) * sin_theta_i * expf(-slope * slope) +
+                           cos_theta_i * (0.5f + 0.5f * (float)erf(slope)));
+            const float diff = CDF - U;
+
+            // test estimate
+            if (std::abs(diff) < 0.00001f)
+                break;
+
+            // update bounds
+            if (diff > 0.0f) {
+                if (erf_max == erf_current)
+                    break;
+                erf_max = erf_current;
+            } else {
+                if (erf_min == erf_current)
+                    break;
+                erf_min = erf_current;
+            }
+
+            // update estimate
+            const float derivative =
+                0.5f * c * cos_theta_i - 0.5f * c * sin_theta_i * slope;
+            erf_current -= diff / derivative;
+        }
+
+        slope.x = ErfInv(std::min(erf_max, std::max(erf_min, erf_current)));
+        slope.y = ErfInv(2.0f * U_2 - 1.0f);
+        return slope;
+    }
+
+  private:
+    Float alpha_x, alpha_y;
+};
+
 }  // namespace pbrt
 
 #endif  // PBRT_UTIL_SCATTERING_H

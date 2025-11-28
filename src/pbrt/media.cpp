@@ -70,6 +70,10 @@ std::string SGGXPhaseFunction::ToString() const {
     return StringPrintf("[ SGGXPhaseFunction ]");
 }
 
+std::string SpecularPhaseFunction::ToString() const {
+    return StringPrintf("[ SpecularPhaseFunction ]");
+}
+
 // HenyeyGreenstein Method Definitions
 std::string HGPhaseFunction::ToString() const {
     return StringPrintf("[ HGPhaseFunction g: %f ]", g);
@@ -196,6 +200,10 @@ FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambd
     p = renderFromMedium.ApplyInverse(p);
     wo = renderFromMedium.ApplyInverse(wo);
     Float rou = Density(p);
+    Float maxRou = Density(Point3f(0.f, 0.f, -3.f * sigma));
+    if (maxRou < rou) {
+        rou = maxRou;
+    }
     Float projectedArea = sggx.Sigma(wo);
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
     SampledSpectrum albedo = albedo_spec.Sample(lambda);
@@ -207,7 +215,7 @@ FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambd
 PBRT_CPU_GPU HomogeneousMajorantIterator
 FuzzyMedium::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
     ray = renderFromMedium.ApplyInverse(ray);
-    Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
+    Float maxRou = Density(Point3f(0.f, 0.f, -3.f * sigma));
     Float projectedArea = sggx.Sigma(-ray.d);
     SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
     return HomogeneousMajorantIterator(0, tMax, sigma_maj);
@@ -271,6 +279,82 @@ SampledSpectrum FuzzyMedium::EvalTransmittance(Point3f x, Point3f y,
 
 std::string FuzzyMedium::ToString() const {
     return StringPrintf("[ Fuzzy medium ]");
+}
+
+SphereMacrofacet *SphereMacrofacet::Create(const ParameterDictionary &parameters,
+                                           const Transform &renderFromMedium,
+                                           const FileLoc *loc, Allocator alloc) {
+    Spectrum albedo = nullptr;
+    if (!albedo) {
+        albedo =
+            parameters.GetOneSpectrum("albedo", nullptr, SpectrumType::Albedo, alloc);
+        if (!albedo)
+            albedo = alloc.new_object<ConstantSpectrum>(1.f);
+    }
+    Float k = parameters.GetOneFloat("k", 1.f);
+    Float alpha = parameters.GetOneFloat("alpha", 1.f);
+    Float sigma = parameters.GetOneFloat("sigma", 1.f / 3.f);
+    Float radius = parameters.GetOneFloat("radius", 1.f);
+    BeckmanDistribution ndf(alpha, alpha);
+    return alloc.new_object<SphereMacrofacet>(renderFromMedium, albedo, k, sigma, radius,
+                                              ndf, alloc);
+}
+
+PBRT_CPU_GPU
+Float SphereMacrofacet::Density(Point3f p) const {
+    Float d = Length(p - Point3f(0.f, 0.f, 0.f)) - radius;
+    if (d <= -3.f * sigma) {
+        d = -3.f * sigma;
+    }
+    Float pdf = Gaussian(d, 0.f, sigma);
+    Float cdf = 0.5f * (1.f + erf(d / (sigma * std::sqrt(2.f))));
+    return k * pdf / cdf;
+}
+
+PBRT_CPU_GPU MediumProperties SphereMacrofacet::SamplePoint(
+    Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
+    p = renderFromMedium.ApplyInverse(p);
+    wo = renderFromMedium.ApplyInverse(wo);
+    Float rou = Density(p);
+    //Float rou = 1.f;
+    //Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
+    //if (maxRou < rou) {
+    //    rou = maxRou;
+    //}
+    Normal3f n = Normal(p);
+    Frame frame = Frame::FromZ(n);
+    Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
+    //Float projectedArea = 1.f;
+    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
+    SampledSpectrum albedo = albedo_spec.Sample(lambda);
+    SampledSpectrum sigma_s = albedo * sigma_t;
+    SampledSpectrum sigma_a = sigma_t - sigma_s;
+
+    SpecularPhaseFunction *phase = new SpecularPhaseFunction(ndf, frame);
+    return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
+}
+
+PBRT_CPU_GPU HomogeneousMajorantIterator
+SphereMacrofacet::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
+    ray = renderFromMedium.ApplyInverse(ray);
+    Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
+    //Float maxRou = 1.f;
+    //Float projectedArea = ndf.projectedArea(-ray.d);
+    Float projectedArea = 1.f;
+    SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
+    return HomogeneousMajorantIterator(0, tMax, sigma_maj);
+}
+
+std::string SphereMacrofacet::ToString() const {
+    return StringPrintf("[ Sphere macrofacet ]");
+}
+
+PBRT_CPU_GPU Normal3f SphereMacrofacet::Normal(Point3f p) const {
+    Float dfdx = 2.f * p.x;
+    Float dfdy = 2.f * p.y;
+    Float dfdz = 2.f * p.z;
+    Normal3f n(dfdx, dfdy, dfdz);
+    return Normalize(n);
 }
 
 // HomogeneousMedium Method Definitions
@@ -814,17 +898,21 @@ NanoVDBMedium *NanoVDBMedium::Create(const ParameterDictionary &parameters,
 }
 
 
-FuzzyNanoVDBMedium::FuzzyNanoVDBMedium(const Transform &renderFromMedium, Spectrum albedo,
-                                       Float k, Float roughness,
-                                       nanovdb::GridHandle<NanoVDBBuffer> dg,
-                                       Allocator alloc)
+MacrofacetVDBMedium::MacrofacetVDBMedium(const Transform &renderFromMedium,
+                                         Spectrum albedo,
+                                         nanovdb::GridHandle<NanoVDBBuffer> dg,
+                                         nanovdb::GridHandle<NanoVDBBuffer> ag,
+                                         nanovdb::GridHandle<NanoVDBBuffer> sg,
+                                         Allocator alloc)
     : renderFromMedium(renderFromMedium),
       albedo_spec(albedo),
-      k(k),
-      phase(roughness),
       majorantGrid(Bounds3f(), {64, 64, 64}, alloc),
-      densityGrid(std::move(dg)) {
+      densityGrid(std::move(dg)),
+      alphaGrid(std::move(ag)),
+      sdfGrid(std::move(sg)) {
     densityFloatGrid = densityGrid.grid<float>();
+    alphaFloatGrid = alphaGrid.grid<float>();
+    sdfFloatGrid = sdfGrid.grid<float>();
     nanovdb::BBox<nanovdb::Vec3R> bbox = densityFloatGrid->worldBBox();
     bounds = Bounds3f(Point3f(bbox.min()[0], bbox.min()[1], bbox.min()[2]),
                       Point3f(bbox.max()[0], bbox.max()[1], bbox.max()[2]));
@@ -894,28 +982,43 @@ FuzzyNanoVDBMedium::FuzzyNanoVDBMedium(const Transform &renderFromMedium, Spectr
 }
 
 PBRT_CPU_GPU
-MediumProperties FuzzyNanoVDBMedium::SamplePoint(Point3f p, Vector3f wo,
-                                                 const SampledWavelengths &lambda) const {
+MediumProperties MacrofacetVDBMedium::SamplePoint(
+    Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
     p = renderFromMedium.ApplyInverse(p);
-    wo = renderFromMedium.ApplyInverse(wo);
+    //wo = renderFromMedium.ApplyInverse(wo);
 
     nanovdb::Vec3<float> pIndex =
         densityFloatGrid->worldToIndexF(nanovdb::Vec3<float>(p.x, p.y, p.z));
     using Sampler = nanovdb::SampleFromVoxels<nanovdb::FloatGrid::TreeType, 1, false>;
     Float rou = Sampler(densityFloatGrid->tree())(pIndex);
+    Float alpha = Sampler(alphaFloatGrid->tree())(pIndex);
+    nanovdb::Vec3<float> sdfGradient = Sampler(sdfFloatGrid->tree()).gradient(pIndex);
 
-    SGGX sggx(1.f);
+    Normal3f normal(sdfGradient[0], sdfGradient[1], sdfGradient[2]);
+    if (rou > 0) {
+        normal = Normalize(normal);
+    } else {
+        normal = Normal3f(0.f, 0.f, 1.f);
+    }
+    normal = renderFromMedium(normal);
+    Frame frame = Frame::FromZ(normal);
 
-    Float projectedArea = sggx.Sigma(wo);
+    BeckmanDistribution ndf(alpha, alpha);
+
+    Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
     SampledSpectrum albedo = albedo_spec.Sample(lambda);
     SampledSpectrum sigma_s = albedo * sigma_t;
     SampledSpectrum sigma_a = sigma_t - sigma_s;
-    return MediumProperties{sigma_a, sigma_s, &phase, SampledSpectrum(0.f)};
+
+    SpecularPhaseFunction *phase = new SpecularPhaseFunction(ndf, frame);
+
+    return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
 }
 
 PBRT_CPU_GPU
-DDAMajorantIterator FuzzyNanoVDBMedium::SampleRay(Ray ray, Float raytMax, const SampledWavelengths& lambda) const {
+DDAMajorantIterator MacrofacetVDBMedium::SampleRay(
+    Ray ray, Float raytMax, const SampledWavelengths &lambda) const {
     // Transform ray to medium's space and compute bounds overlap
     ray = renderFromMedium.ApplyInverse(ray, &raytMax);
     Float tMin, tMax;
@@ -923,40 +1026,45 @@ DDAMajorantIterator FuzzyNanoVDBMedium::SampleRay(Ray ray, Float raytMax, const 
         return {};
     DCHECK_LE(tMax, raytMax);
 
-    SGGX sggx(1.f);
-
-    SampledSpectrum sigma_t = SampledSpectrum(sggx.Sigma(-ray.d));
+    SampledSpectrum sigma_t = SampledSpectrum(1.f);
 
     return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
 }
 
-std::string FuzzyNanoVDBMedium::ToString() const {
-    return StringPrintf("[ FuzzyNanoVDBMedium ]");
+std::string MacrofacetVDBMedium::ToString() const {
+    return StringPrintf("[ MacrofacetVDBMedium ]");
 }
 
-FuzzyNanoVDBMedium *FuzzyNanoVDBMedium::Create(const ParameterDictionary &parameters,
-                                               const Transform &renderFromMedium,
-                                               const FileLoc *loc, Allocator alloc) {
+MacrofacetVDBMedium *MacrofacetVDBMedium::Create(const ParameterDictionary &parameters,
+                                                 const Transform &renderFromMedium,
+                                                 const FileLoc *loc, Allocator alloc) {
     std::string filename = ResolveFilename(parameters.GetOneString("filename", ""));
     if (filename.empty())
         ErrorExit(loc, "Must supply \"filename\" to \"nanovdb\" medium.");
 
     nanovdb::GridHandle<NanoVDBBuffer> densityGrid;
-    std::string gridname = parameters.GetOneString("gridname", "density");
-    densityGrid = readGrid<NanoVDBBuffer>(filename, gridname, loc, alloc);
+    densityGrid = readGrid<NanoVDBBuffer>(filename, "density", loc, alloc);
     if (!densityGrid)
         ErrorExit(loc, "%s: didn't find \"density\" grid.", filename);
 
-    Float k = parameters.GetOneFloat("k", 1.f);
-    Float roughness = parameters.GetOneFloat("roughness", 1.f);
+    nanovdb::GridHandle<NanoVDBBuffer> alphaGrid;
+    alphaGrid = readGrid<NanoVDBBuffer>(filename, "alpha", loc, alloc);
+    if (!alphaGrid)
+        ErrorExit(loc, "%s: didn't find \"alpha\" grid.", filename);
+
+    nanovdb::GridHandle<NanoVDBBuffer> sdfGrid;
+    sdfGrid = readGrid<NanoVDBBuffer>(filename, "sdf", loc, alloc);
+    if (!sdfGrid)
+        ErrorExit(loc, "%s: didn't find \"sdf\" grid.", filename);
 
     Spectrum albedo =
         parameters.GetOneSpectrum("albedo", nullptr, SpectrumType::Unbounded, alloc);
     if (!albedo)
         albedo = alloc.new_object<ConstantSpectrum>(1.f);
 
-    return alloc.new_object<FuzzyNanoVDBMedium>(renderFromMedium, albedo, k, roughness,
-                                                std::move(densityGrid), alloc);
+    return alloc.new_object<MacrofacetVDBMedium>(
+        renderFromMedium, albedo, std::move(densityGrid), std::move(alphaGrid),
+        std::move(sdfGrid), alloc);
 }
 
 Medium Medium::Create(const std::string &name, const ParameterDictionary &parameters,
@@ -975,8 +1083,10 @@ Medium Medium::Create(const std::string &name, const ParameterDictionary &parame
         m = NanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "fuzzy") {
         m = FuzzyMedium::Create(parameters, renderFromMedium, loc, alloc);
-    } else if (name == "fuzzyvdb") {
-        m = FuzzyNanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
+    } else if (name == "spheremacrofacet") {
+        m = SphereMacrofacet::Create(parameters, renderFromMedium, loc, alloc);
+    } else if (name == "macrofacetvdb") {
+        m = MacrofacetVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else
         ErrorExit(loc, "%s: medium unknown.", name);
 
