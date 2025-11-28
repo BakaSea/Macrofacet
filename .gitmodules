@@ -36,10 +36,9 @@
 [submodule "src/ext/glfw"]
 	path = src/ext/glfw
 	url = https://github.com/glfw/glfw.git
-
 [submodule "src/ext/libigl"]
 	path = src/ext/libigl
-	url = https://gitlab.com/libeigen/eigen.git
+	url = https://github.com/libigl/libigl.git
 [submodule "src/ext/eigen"]
 	path = src/ext/eigen
 	url = https://gitlab.com/libeigen/eigen.git
