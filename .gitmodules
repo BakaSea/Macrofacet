@@ -36,7 +36,6 @@
 [submodule "src/ext/glfw"]
 	path = src/ext/glfw
 	url = https://github.com/glfw/glfw.git
-
 [submodule "src/ext/libigl"]
 	path = src/ext/libigl
 	url = https://github.com/libigl/libigl.git
