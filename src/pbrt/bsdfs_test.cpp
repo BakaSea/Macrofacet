@@ -443,7 +443,7 @@ BSDF* createConductorMicrofacet(const SurfaceInteraction& si, Allocator alloc, f
                                 float k, float roughx, float roughy) {
     Float alphax = TrowbridgeReitzDistribution::RoughnessToAlpha(roughx);
     Float alphay = TrowbridgeReitzDistribution::RoughnessToAlpha(roughy);
-    TrowbridgeReitzDistribution distrib(alphax, alphay);
+    NormalDistribution distrib(GGX, alphax, alphay);
     return alloc.new_object<BSDF>(si.shading.n, si.shading.dpdu,
                                   alloc.new_object<ConductorBxDF>(
                                       distrib, SampledSpectrum(eta), SampledSpectrum(k)));

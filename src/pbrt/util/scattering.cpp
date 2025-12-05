@@ -35,4 +35,9 @@ std::string TrowbridgeReitzDistribution::ToString() const {
                         alpha_x, alpha_y);
 }
 
+std::string BeckmannDistribution::ToString() const {
+    return StringPrintf("[ BeckmannDistribution alpha_x: %f alpha_y: %f ]", alpha_x,
+                        alpha_y);
+}
+
 }  // namespace pbrt

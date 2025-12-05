@@ -216,7 +216,7 @@ class SpecularPhaseFunction {
   public:
     SpecularPhaseFunction() = default;
     PBRT_CPU_GPU
-    SpecularPhaseFunction(const BeckmanDistribution &distrib, const Frame &frame)
+    SpecularPhaseFunction(const BeckmannDistribution &distrib, const Frame &frame)
         : distrib(distrib), frame(frame) {}
 
     PBRT_CPU_GPU
@@ -229,7 +229,7 @@ class SpecularPhaseFunction {
             return 0.0f;
 
         // value
-        const Float value = 0.25f * distrib.D_wi(wo, wh) / Dot(wo, wh);
+        const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
         return value;
     }
 
@@ -253,7 +253,7 @@ class SpecularPhaseFunction {
     std::string ToString() const;
 
   private:
-    BeckmanDistribution distrib;
+    BeckmannDistribution distrib;
     Frame frame;
 };
 
@@ -460,7 +460,7 @@ class SphereMacrofacet {
     using MajorantIterator = HomogeneousMajorantIterator;
 
     SphereMacrofacet(const Transform &renderFromMedium, Spectrum albedo, Float k,
-                     Float sigma, Float radius, BeckmanDistribution ndf, Allocator alloc)
+                     Float sigma, Float radius, BeckmannDistribution ndf, Allocator alloc)
         : renderFromMedium(renderFromMedium),
           albedo_spec(albedo, alloc),
           k(k),
@@ -514,7 +514,7 @@ class SphereMacrofacet {
 
     Transform renderFromMedium;
     DenselySampledSpectrum albedo_spec;
-    BeckmanDistribution ndf;
+    BeckmannDistribution ndf;
     Float k, sigma, radius;
     Allocator alloc;
 };

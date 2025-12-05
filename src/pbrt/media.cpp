@@ -295,7 +295,7 @@ SphereMacrofacet *SphereMacrofacet::Create(const ParameterDictionary &parameters
     Float alpha = parameters.GetOneFloat("alpha", 1.f);
     Float sigma = parameters.GetOneFloat("sigma", 1.f / 3.f);
     Float radius = parameters.GetOneFloat("radius", 1.f);
-    BeckmanDistribution ndf(alpha, alpha);
+    BeckmannDistribution ndf(alpha, alpha);
     return alloc.new_object<SphereMacrofacet>(renderFromMedium, albedo, k, sigma, radius,
                                               ndf, alloc);
 }
@@ -1003,7 +1003,7 @@ MediumProperties MacrofacetVDBMedium::SamplePoint(
     normal = renderFromMedium(normal);
     Frame frame = Frame::FromZ(normal);
 
-    BeckmanDistribution ndf(alpha, alpha);
+    BeckmannDistribution ndf(alpha, alpha);
 
     Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);

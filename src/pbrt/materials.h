@@ -493,8 +493,18 @@ class ConductorMaterial {
         // Return BSDF for _ConductorMaterial_
         Float uRough = texEval(uRoughness, ctx), vRough = texEval(vRoughness, ctx);
         if (remapRoughness) {
-            uRough = TrowbridgeReitzDistribution::RoughnessToAlpha(uRough);
-            vRough = TrowbridgeReitzDistribution::RoughnessToAlpha(vRough);
+            switch (ndfType) {
+            case pbrt::GGX:
+                uRough = TrowbridgeReitzDistribution::RoughnessToAlpha(uRough);
+                vRough = TrowbridgeReitzDistribution::RoughnessToAlpha(vRough);
+                break;
+            case pbrt::Beckmann:
+                uRough = BeckmannDistribution::RoughnessToAlpha(uRough);
+                vRough = BeckmannDistribution::RoughnessToAlpha(vRough);
+                break;
+            default:
+                break;
+            }
         }
         SampledSpectrum etas, ks;
         if (eta) {
@@ -506,13 +516,13 @@ class ConductorMaterial {
             etas = SampledSpectrum(1.f);
             ks = 2 * Sqrt(r) / Sqrt(ClampZero(SampledSpectrum(1) - r));
         }
-        TrowbridgeReitzDistribution distrib(uRough, vRough);
+        NormalDistribution distrib(ndfType, uRough, vRough);
         return ConductorBxDF(distrib, etas, ks);
     }
 
     ConductorMaterial(SpectrumTexture eta, SpectrumTexture k, SpectrumTexture reflectance,
                       FloatTexture uRoughness, FloatTexture vRoughness,
-                      FloatTexture displacement, Image *normalMap, bool remapRoughness)
+                      FloatTexture displacement, Image *normalMap, NormalDistributionType ndfType, bool remapRoughness)
         : displacement(displacement),
           normalMap(normalMap),
           eta(eta),
@@ -520,6 +530,7 @@ class ConductorMaterial {
           reflectance(reflectance),
           uRoughness(uRoughness),
           vRoughness(vRoughness),
+          ndfType(ndfType),
           remapRoughness(remapRoughness) {}
 
     static const char *Name() { return "ConductorMaterial"; }
@@ -547,6 +558,7 @@ class ConductorMaterial {
     Image *normalMap;
     SpectrumTexture eta, k, reflectance;
     FloatTexture uRoughness, vRoughness;
+    NormalDistributionType ndfType;
     bool remapRoughness;
 };
 

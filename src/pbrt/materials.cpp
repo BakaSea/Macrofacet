@@ -245,9 +245,17 @@ ConductorMaterial *ConductorMaterial::Create(const TextureParameterDictionary &p
     FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
     bool remapRoughness = parameters.GetOneBool("remaproughness", true);
 
+    std::string ndfTypeStr = parameters.GetOneString("ndf", "ggx");
+    NormalDistributionType ndfType;
+    if (ndfTypeStr == "ggx") {
+        ndfType = GGX;
+    } else if (ndfTypeStr == "beckmann") {
+        ndfType = Beckmann;
+    }
+
     return alloc.new_object<ConductorMaterial>(eta, k, reflectance, uRoughness,
                                                vRoughness, displacement, normalMap,
-                                               remapRoughness);
+                                               ndfType, remapRoughness);
 }
 
 // CoatedDiffuseMaterial Method Definitions
@@ -381,7 +389,7 @@ PBRT_CPU_GPU CoatedConductorBxDF CoatedConductorMaterial::GetBxDF(TextureEvaluat
         curough = TrowbridgeReitzDistribution::RoughnessToAlpha(curough);
         cvrough = TrowbridgeReitzDistribution::RoughnessToAlpha(cvrough);
     }
-    TrowbridgeReitzDistribution conductorDistrib(curough, cvrough);
+    NormalDistribution conductorDistrib(GGX, curough, cvrough);
 
     SampledSpectrum a = Clamp(texEval(albedo, ctx, lambda), 0, 1);
     Float gg = Clamp(texEval(g, ctx), -1, 1);

@@ -39,8 +39,9 @@ int main(int argc, char* argv[]) {
 
     std::string filename;
     float sigma = 0.05f;
-    float minSigma = 0.01f;
+    float minSigma = 0.005f;
     float alpha = 0.5f;
+    float minAlpha = 0.1f;
     int xRes = 32, yRes = 32, zRes = 32;
     for (auto iter = args.begin(); iter != args.end(); ++iter) {
         if ((*iter)[0] != '-') {
@@ -84,7 +85,9 @@ int main(int argc, char* argv[]) {
     }
 
     float minX = bbox.pMin.x;
+    float minY = bbox.pMin.y;
     float invXInterval = 1.f / (bbox.pMax.x - bbox.pMin.x);
+    float invYInterval = 1.f / (bbox.pMax.y - bbox.pMin.y);
 
     Vector3f sigmaOffset(3.f * sigma, 3.f * sigma, 3.f * sigma);
     bbox.pMin -= sigmaOffset;
@@ -209,16 +212,20 @@ int main(int argc, char* argv[]) {
                 tree.squared_distance(V, F, P, sqrD, I, closestPoint);
                 float w = igl::fast_winding_number(bvh, 2, P);
                 float dist = std::sqrt(sqrD(0)) * (1.f - 2.f * std::abs(w));
-                float intrSigma = sigma;
-                //float intrSigma = Lerp((closestPoint.x() - minX) * invXInterval, minSigma, sigma);
-                float intrAlpha = alpha;
-                //if (-3.f * intrSigma < dist && dist < 3.f * intrSigma) {
+                //float intrSigma = sigma;
+                float intrSigma = Lerp((closestPoint.y() - minY) * invYInterval, sigma, minSigma);
+                //float intrAlpha = alpha;
+                float intrAlpha = Lerp((closestPoint.x() - minX) * invXInterval, minAlpha, alpha);
+                if (-3.f * intrSigma < dist && dist < 3.f * intrSigma) {
                     float d = Density(dist, intrSigma, 1.f);
                     nanovdb::Coord ijk(i, j, k);
                     densityAccessor.setValue(ijk, d);
+                    if (IsInf(d)) {
+                        printf("%d %d %d\n", i, j, k);
+                    }
                     alphaAccessor.setValue(ijk, intrAlpha);
                     sdfAccessor.setValue(ijk, dist);
-                //}
+                }
             }
         }
     }

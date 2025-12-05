@@ -267,8 +267,8 @@ std::string ThinDielectricBxDF::ToString() const {
 }
 
 std::string ConductorBxDF::ToString() const {
-    return StringPrintf("[ ConductorBxDF mfDistrib: %s eta: %s k: %s ]", mfDistrib, eta,
-                        k);
+    return StringPrintf("[ ConductorBxDF mfDistrib: %s eta: %s k: %s ]",
+                        mfDistrib.ToString(), eta, k);
 }
 
 // HairBxDF Method Definitions

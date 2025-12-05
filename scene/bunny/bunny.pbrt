@@ -1,5 +1,5 @@
 Sampler "halton"
-  "integer pixelsamples" 16
+  "integer pixelsamples" 1024
 LookAt 0 0 6
        0 0 0
        0 1 0
@@ -74,7 +74,7 @@ AttributeBegin
   Rotate 180 0 1 0
   Scale 1 1 1
   MakeNamedMedium "macrofacet" "string type" "macrofacetvdb" 
-    "string filename" "bunny-01.nvdb"
+    "string filename" "bunny-001.nvdb"
     "rgb albedo" [ 1 1 1 ]
   AttributeBegin
     Material "interface"

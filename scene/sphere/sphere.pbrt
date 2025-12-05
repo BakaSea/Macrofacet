@@ -1,5 +1,5 @@
 Sampler "halton"
-  "integer pixelsamples" 1024
+  "integer pixelsamples" 16
 LookAt 0 0 6
        0 0 0
        0 1 0
@@ -13,7 +13,7 @@ Film "rgb"
   "string filename" "sphere.exr"
 
 Integrator "volpath"
-  #"integer maxdepth" 2
+  "integer maxdepth" 1
 
 WorldBegin
 
@@ -66,14 +66,14 @@ MakeNamedMedium "homo" "string type" "homogeneous" "rgb sigma_a" [0.2 0.3 0.4] "
 
 AttributeBegin
   MakeNamedMedium "macrofacet" "string type" "spheremacrofacet"
-    "float alpha" [ 0.1 ]
+    "float alpha" [ 0.5 ]
     "float sigma" [ 0.01 ]
   AttributeBegin
     Material "interface"
     MediumInterface "macrofacet" ""
     #MediumInterface "homo" ""
     #Material "diffuse"
-    #Material "conductor" "float roughness" [ 0.01 ] "rgb reflectance" [1.0 1.0 1.0]
+    #Material "conductor" "float roughness" [ 0.25 ] "rgb reflectance" [1.0 1.0 1.0]
     Shape "sphere" "float radius" [ 1.03 ]
   AttributeEnd
 AttributeEnd

@@ -282,7 +282,7 @@ class ConductorBxDF {
     // ConductorBxDF Public Methods
     ConductorBxDF() = default;
     PBRT_CPU_GPU
-    ConductorBxDF(const TrowbridgeReitzDistribution &mfDistrib, SampledSpectrum eta,
+    ConductorBxDF(const NormalDistribution &mfDistrib, SampledSpectrum eta,
                   SampledSpectrum k)
         : mfDistrib(mfDistrib), eta(eta), k(k) {}
 
@@ -376,7 +376,7 @@ class ConductorBxDF {
 
   private:
     // ConductorBxDF Private Members
-    TrowbridgeReitzDistribution mfDistrib;
+    NormalDistribution mfDistrib;
     SampledSpectrum eta, k;
 };
 
