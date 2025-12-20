@@ -107,7 +107,8 @@ Float FresnelMoment2(Float invEta);
 
 enum NormalDistributionType {
     GGX,
-    Beckmann
+    Beckmann,
+    GP
 };
 
 // TrowbridgeReitzDistribution Definition
@@ -190,6 +191,9 @@ class TrowbridgeReitzDistribution {
         return Normalize(
             Vector3f(alpha_x * nh.x, alpha_y * nh.y, std::max<Float>(1e-6f, nh.z)));
     }
+
+    PBRT_CPU_GPU
+    Float projectedArea(Vector3f wi) const { return (1.f + Lambda(wi)) * CosTheta(wi); }
 
     std::string ToString() const;
 
@@ -444,16 +448,129 @@ class BeckmannDistribution {
     Float alpha_x, alpha_y;
 };
 
+class GPDistribution {
+  public:
+    GPDistribution() = default;
+    PBRT_CPU_GPU
+    GPDistribution(Float ax, Float ay, Float az) : alpha_x(ax), alpha_y(ay), alpha_z(az) {
+        if (!EffectivelySmooth()) {
+            alpha_x = std::max<Float>(alpha_x, 1e-4f);
+            alpha_y = std::max<Float>(alpha_y, 1e-4f);
+            alpha_z = std::max<Float>(alpha_z, 1e-4f);
+        }
+    }
+
+    PBRT_CPU_GPU
+    bool EffectivelySmooth() const {
+        return std::max(alpha_x, std::max(alpha_y, alpha_z)) < 1e-3f;
+    }
+
+    PBRT_CPU_GPU
+    Float G1(Vector3f w) const { return 1 / (1 + Lambda(w)); }
+
+    PBRT_CPU_GPU
+    Float G(Vector3f wo, Vector3f wi) const { return 1 / (1 + Lambda(wo) + Lambda(wi)); }
+
+    PBRT_CPU_GPU
+    Float PDF(Vector3f w, Vector3f wm) const { return D(w, wm); }
+
+    PBRT_CPU_GPU
+    Float D(Vector3f wm) const;
+
+    PBRT_CPU_GPU
+    inline Float D(Vector3f wi, Vector3f wm) const {
+        // normalization coefficient
+        const Float projectedarea = projectedArea(wi);
+        if (projectedarea == 0)
+            return 0;
+        const Float c = 1.0f / projectedarea;
+
+        // value
+        const Float value = c * std::max(0.0f, Dot(wi, wm)) * D(wm);
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    inline double alpha_i(Vector3f wi) const {
+        return std::sqrt(alpha_x * alpha_x * wi.x * wi.x +
+                         alpha_y * alpha_y * wi.y * wi.y +
+                         alpha_z * alpha_z * wi.z * wi.z);
+    }
+
+    PBRT_CPU_GPU
+    Float Lambda(Vector3f wi) const {
+        if (wi.z > 0.9999f)
+            return 0.0f;
+        if (wi.z < -0.9999f)
+            return -1.0f;
+
+        const double a = wi.z / alpha_i(wi);
+
+        const double value =
+            0.5 * (erf(a) - 1.0) + 1.0 / (2.0 * a * std::sqrt(Pi)) * exp(-a * a);
+
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    Float projectedArea(Vector3f wi) const {
+        if (wi.z > 0.9999f)
+            return 1.0f;
+        if (wi.z < -0.9999f)
+            return 0.0f;
+
+        // a
+        const double alphai = alpha_i(wi);
+        const double a = wi.z / alphai;
+
+        // value
+        const double value = 0.5 * (erf(a) + 1.0) * wi.z +
+                             1.0 / (2.0 * std::sqrt(Pi)) * alphai * exp(-a * a);
+
+        return std::min<Float>(value, 1.f);
+    }
+
+    PBRT_CPU_GPU
+    Vector3f Sample_wm(Vector3f wi, Point2f u) const {
+        Float x = SampleNormal(u.x, 0.f, alpha_x / Sqrt2);
+        Float y = SampleNormal(u.y, 0.f, alpha_y / Sqrt2);
+        RNG rng;
+        Float z = SampleNormal(rng.Uniform<Float>(), 1.f, alpha_z / Sqrt2);
+        Vector3f wm(x, y, z);
+        wm = Normalize(wm);
+        return wm;
+    }
+
+    PBRT_CPU_GPU
+    static Float RoughnessToAlpha(Float roughness) { return std::sqrt(roughness); }
+
+    PBRT_CPU_GPU
+    void Regularize() {
+        if (alpha_x < 0.3f)
+            alpha_x = Clamp(2 * alpha_x, 0.1f, 0.3f);
+        if (alpha_y < 0.3f)
+            alpha_y = Clamp(2 * alpha_y, 0.1f, 0.3f);
+    }
+
+    std::string ToString() const;
+
+  private:
+    Float alpha_x, alpha_y, alpha_z;
+};
+
 class NormalDistribution {
   public:
     NormalDistribution() = default;
-    NormalDistribution(NormalDistributionType type, Float ax, Float ay) : type(type) {
+    NormalDistribution(NormalDistributionType type, Float ax, Float ay, Float az = 1e-4f) : type(type) {
         switch (type) {
         case pbrt::GGX:
             ggx = TrowbridgeReitzDistribution(ax, ay);
             break;
         case pbrt::Beckmann:
             beckmann = BeckmannDistribution(ax, ay);
+            break;
+        case pbrt::GP:
+            gp = GPDistribution(ax, ay, az);
             break;
         default:
             break;
@@ -466,6 +583,8 @@ class NormalDistribution {
             return ggx.D(wm);
         case pbrt::Beckmann:
             return beckmann.D(wm);
+        case pbrt::GP:
+            return gp.D(wm);
         default:
             return 0.f;
         }
@@ -478,6 +597,8 @@ class NormalDistribution {
             return ggx.EffectivelySmooth();
         case pbrt::Beckmann:
             return beckmann.EffectivelySmooth();
+        case pbrt::GP:
+            return gp.EffectivelySmooth();
         default:
             return false;
         }
@@ -490,6 +611,8 @@ class NormalDistribution {
             return ggx.G(wo, wi);
         case pbrt::Beckmann:
             return beckmann.G(wo, wi);
+        case pbrt::GP:
+            return gp.G(wo, wi);
         default:
             return 0.f;
         }
@@ -502,6 +625,8 @@ class NormalDistribution {
             return ggx.D(w, wm);
         case pbrt::Beckmann:
             return beckmann.D(w, wm);
+        case pbrt::GP:
+            return gp.D(w, wm);
         default:
             return 0.f;
         }
@@ -514,6 +639,22 @@ class NormalDistribution {
             return ggx.PDF(w, wm);
         case pbrt::Beckmann:
             return beckmann.PDF(w, wm);
+        case pbrt::GP:
+            return gp.PDF(w, wm);
+        default:
+            return 0.f;
+        }
+    }
+
+    PBRT_CPU_GPU
+    Float projectedArea(Vector3f w) const {
+        switch (type) {
+        case pbrt::GGX:
+            return ggx.projectedArea(w);
+        case pbrt::Beckmann:
+            return beckmann.projectedArea(w);
+        case pbrt::GP:
+            return gp.projectedArea(w);
         default:
             return 0.f;
         }
@@ -526,6 +667,8 @@ class NormalDistribution {
             return ggx.Sample_wm(w, u);
         case pbrt::Beckmann:
             return beckmann.Sample_wm(w, u);
+        case pbrt::GP:
+            return gp.Sample_wm(w, u);
         default:
             return Vector3f(0.f, 0.f, 0.f);
         }
@@ -538,6 +681,8 @@ class NormalDistribution {
             return ggx.Regularize();
         case pbrt::Beckmann:
             return beckmann.Regularize();
+        case pbrt::GP:
+            return gp.Regularize();
         default:
             return;
         }
@@ -549,16 +694,19 @@ class NormalDistribution {
             return ggx.ToString();
         case pbrt::Beckmann:
             return beckmann.ToString();
+        case pbrt::GP:
+            return gp.ToString();
         default:
             return "";
         }
     }
 
-  private:
     NormalDistributionType type;
+  private:
     union {
         TrowbridgeReitzDistribution ggx;
         BeckmannDistribution beckmann;
+        GPDistribution gp;
     };
 };
 

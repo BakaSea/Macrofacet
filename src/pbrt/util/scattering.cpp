@@ -40,4 +40,22 @@ std::string BeckmannDistribution::ToString() const {
                         alpha_y);
 }
 
+PBRT_CPU_GPU
+Float GPDistribution::D(Vector3f wm) const {
+    double C = 1.f / (alpha_z * alpha_z);
+    double A = wm.x * wm.x / (alpha_x * alpha_x) + wm.y * wm.y / (alpha_y * alpha_y) +
+              wm.z * wm.z * C;
+    double B = wm.z * C;
+    double sqrtPi = std::sqrtf(Pi);
+    double sqrtA = std::sqrtf(A);
+    return 1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z * std::abs(wm.z)) * exp(-C) *
+           (B / (2.0 * A * A) + sqrtPi / (4.0 * A * sqrtA) * exp(B * B / A) *
+                                    (2.0 * B * B / A + 1.f) * erfc(-B / sqrtA));
+}
+
+std::string GPDistribution::ToString() const {
+    return StringPrintf("[ GPDistribution alpha_x: %f alpha_y: %f ]", alpha_x, alpha_y,
+                        alpha_z);
+}
+
 }  // namespace pbrt

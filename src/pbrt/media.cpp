@@ -70,6 +70,26 @@ std::string SGGXPhaseFunction::ToString() const {
     return StringPrintf("[ SGGXPhaseFunction ]");
 }
 
+PBRT_CPU_GPU pstd::optional<PhaseFunctionSample> SpecularPhaseFunction::Sample_p(
+    Vector3f wo, Point2f u) const {
+    Vector3f localWo = frame.ToLocal(wo);
+    Vector3f wm = distrib.Sample_wm(localWo, u);
+
+    // reflect
+    //if (!SameHemisphere(localWo, wm)) {
+    //    return {};
+    //}
+    Vector3f localWi = -localWo + 2.0f * wm * Dot(localWo, wm);
+    Vector3f wi = frame.FromLocal(localWi);
+    Float phaseVal = p(wo, wi);
+    if (distrib.type == GP) {
+        Float pdf = distrib.D(wm) / (4.f * Dot(localWi, wm));
+        return PhaseFunctionSample{phaseVal, wi, pdf};
+    } else {
+        return PhaseFunctionSample{phaseVal, wi, phaseVal};
+    }
+}
+
 std::string SpecularPhaseFunction::ToString() const {
     return StringPrintf("[ SpecularPhaseFunction ]");
 }
@@ -293,9 +313,20 @@ SphereMacrofacet *SphereMacrofacet::Create(const ParameterDictionary &parameters
     }
     Float k = parameters.GetOneFloat("k", 1.f);
     Float alpha = parameters.GetOneFloat("alpha", 1.f);
+    Float alpha_z = parameters.GetOneFloat("alphaz", 1e-4f);
     Float sigma = parameters.GetOneFloat("sigma", 1.f / 3.f);
     Float radius = parameters.GetOneFloat("radius", 1.f);
-    BeckmannDistribution ndf(alpha, alpha);
+    std::string ndfTypeStr = parameters.GetOneString("ndf", "ggx");
+    NormalDistributionType ndfType;
+    if (ndfTypeStr == "ggx") {
+        ndfType = GGX;
+    } else if (ndfTypeStr == "beckmann") {
+        ndfType = Beckmann;
+    } else if (ndfTypeStr == "gp") {
+        ndfType = GP;
+    }
+
+    NormalDistribution ndf(ndfType, alpha, alpha, alpha_z);
     return alloc.new_object<SphereMacrofacet>(renderFromMedium, albedo, k, sigma, radius,
                                               ndf, alloc);
 }
@@ -1003,7 +1034,7 @@ MediumProperties MacrofacetVDBMedium::SamplePoint(
     normal = renderFromMedium(normal);
     Frame frame = Frame::FromZ(normal);
 
-    BeckmannDistribution ndf(alpha, alpha);
+    NormalDistribution ndf(Beckmann, alpha, alpha);
 
     Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);

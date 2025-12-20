@@ -1,5 +1,5 @@
 Sampler "halton"
-  "integer pixelsamples" 512
+  "integer pixelsamples" 16
 LookAt 3 0 0
        0 0 0
        0 0 1
@@ -23,7 +23,9 @@ AttributeEnd
 
 AttributeBegin
   MakeNamedMedium "macrofacet" "string type" "spheremacrofacet"
+    "string ndf" "gp" 
     "float alpha" [ 1.0 ]
+    "float alphaz" [ 0.5 ]
     "float sigma" [ 0.001 ]
   AttributeBegin
     Material "interface"

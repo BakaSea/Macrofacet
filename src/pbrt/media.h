@@ -216,7 +216,7 @@ class SpecularPhaseFunction {
   public:
     SpecularPhaseFunction() = default;
     PBRT_CPU_GPU
-    SpecularPhaseFunction(const BeckmannDistribution &distrib, const Frame &frame)
+    SpecularPhaseFunction(const NormalDistribution &distrib, const Frame &frame)
         : distrib(distrib), frame(frame) {}
 
     PBRT_CPU_GPU
@@ -225,8 +225,8 @@ class SpecularPhaseFunction {
         wi = frame.ToLocal(wi);
         // half vector
         const Vector3f wh = Normalize(wi + wo);
-        if (wh.z < 0.0f)
-            return 0.0f;
+        //if (wh.z < 0.0f)
+        //    return 0.0f;
 
         // value
         const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
@@ -234,16 +234,7 @@ class SpecularPhaseFunction {
     }
 
     PBRT_CPU_GPU
-    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
-        Vector3f localWo = frame.ToLocal(wo);
-        Vector3f wm = distrib.Sample_wm(localWo, u);
-
-        // reflect
-        Vector3f localWi = -localWo + 2.0f * wm * Dot(localWo, wm);
-        Vector3f wi = frame.FromLocal(localWi);
-        Float pdf = p(wo, wi);
-        return PhaseFunctionSample{pdf, wi, pdf};
-    }
+    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const;
 
     PBRT_CPU_GPU
     Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi); }
@@ -253,7 +244,7 @@ class SpecularPhaseFunction {
     std::string ToString() const;
 
   private:
-    BeckmannDistribution distrib;
+    NormalDistribution distrib;
     Frame frame;
 };
 
@@ -460,7 +451,7 @@ class SphereMacrofacet {
     using MajorantIterator = HomogeneousMajorantIterator;
 
     SphereMacrofacet(const Transform &renderFromMedium, Spectrum albedo, Float k,
-                     Float sigma, Float radius, BeckmannDistribution ndf, Allocator alloc)
+                     Float sigma, Float radius, NormalDistribution ndf, Allocator alloc)
         : renderFromMedium(renderFromMedium),
           albedo_spec(albedo, alloc),
           k(k),
@@ -514,7 +505,7 @@ class SphereMacrofacet {
 
     Transform renderFromMedium;
     DenselySampledSpectrum albedo_spec;
-    BeckmannDistribution ndf;
+    NormalDistribution ndf;
     Float k, sigma, radius;
     Allocator alloc;
 };
