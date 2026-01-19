@@ -890,7 +890,7 @@ SampledSpectrum SimpleVolPathIntegrator::Li(RayDifferential ray,
                                 }
 
                                 // Update state for recursive evaluation of $L_\roman{i}$
-                                beta *= ps->p / ps->pdf;
+                                //beta *= ps->p / ps->pdf;
                                 ray.o = p;
                                 ray.d = ps->wi;
                                 scattered = true;
@@ -2043,7 +2043,8 @@ struct Vertex {
         else if (type == VertexType::Surface)
             pdf = bsdf.PDF(wp, wn);
         else if (type == VertexType::Medium)
-            pdf = mi.phase.p(wp, wn);
+            ;
+            //pdf = mi.phase.p(wp, wn);
         else
             LOG_FATAL("Vertex::PDF(): Unimplemented");
 

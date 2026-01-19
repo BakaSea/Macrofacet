@@ -41,16 +41,64 @@ std::string BeckmannDistribution::ToString() const {
 }
 
 PBRT_CPU_GPU
+Vector3f GPDistribution::Sample_wm(Vector3f wi, Point2f u) const {
+    Frame frame = Frame::FromZ(wi);
+    Vector3f wm = SampleUniformHemisphere(u);
+    wm = frame.FromLocal(wm);
+    //Float x = SampleNormal(u.x, 0.f, alpha_x / Sqrt2);
+    //Float y = SampleNormal(u.y, 0.f, alpha_y / Sqrt2);
+    //RNG rng;
+    //Float z = SampleNormal(rng.Uniform<Float>(), 1.f, alpha_z / Sqrt2);
+    //Vector3f wm(x, y, z);
+    //wm = Normalize(wm);
+    return wm;
+}
+
+PBRT_CPU_GPU
 Float GPDistribution::D(Vector3f wm) const {
+    //double C = 1.f / (alpha_z * alpha_z);
+    //double A = wm.x * wm.x / (alpha_x * alpha_x) + wm.y * wm.y / (alpha_y * alpha_y) +
+    //          wm.z * wm.z * C;
+    //double B = wm.z * C;
+    //double sqrtPi = std::sqrt(Pi);
+    //double sqrtA = std::sqrt(A);
+    //return 1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z) * exp(-C) *
+    //       (B / (2.0 * A * A) + sqrtPi / (4.0 * A * sqrtA) * exp(B * B / A) *
+    //                                (2.0 * B * B / A + 1.f) * erfc(-B / sqrtA));
     double C = 1.f / (alpha_z * alpha_z);
     double A = wm.x * wm.x / (alpha_x * alpha_x) + wm.y * wm.y / (alpha_y * alpha_y) +
-              wm.z * wm.z * C;
+               wm.z * wm.z * C;
     double B = wm.z * C;
-    double sqrtPi = std::sqrtf(Pi);
-    double sqrtA = std::sqrtf(A);
-    return 1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z * std::abs(wm.z)) * exp(-C) *
-           (B / (2.0 * A * A) + sqrtPi / (4.0 * A * sqrtA) * exp(B * B / A) *
-                                    (2.0 * B * B / A + 1.f) * erfc(-B / sqrtA));
+    const double sqrtPi = std::sqrt(Pi);
+    const double sqrtA = std::sqrt(A);
+
+    double d =
+        1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z) * exp(-C + B * B / A) *
+        ((B * B / A + 1.0) / (2 * A * A) * exp(-B * B / A) +
+         B * sqrtPi / (2.0 * A * A * sqrtA) * (1.5 + B * B / A) * erfc(-B / sqrtA));
+
+    return std::abs(wm.z) * d;
+}
+
+PBRT_CPU_GPU
+Float GPDistribution::D(Vector3f wi, Vector3f wm) const {
+    double projectedarea = projectedArea(wi);
+    if (projectedarea == 0)
+        return 0;
+
+    double C = 1.f / (alpha_z * alpha_z);
+    double A = wm.x * wm.x / (alpha_x * alpha_x) + wm.y * wm.y / (alpha_y * alpha_y) +
+               wm.z * wm.z * C;
+    double B = wm.z * C;
+    const double sqrtPi = std::sqrt(Pi);
+    const double sqrtA = std::sqrt(A);
+
+    double d =
+        1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z) * exp(-C + B * B / A) *
+        ((B * B / A + 1.0) / (2 * A * A) * exp(-B * B / A) +
+         B * sqrtPi / (2.0 * A * A * sqrtA) * (1.5 + B * B / A) * erfc(-B / sqrtA));
+
+    return std::max(Dot(wi, wm), 0.f) * d / projectedarea;
 }
 
 std::string GPDistribution::ToString() const {

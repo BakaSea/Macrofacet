@@ -1,5 +1,7 @@
-Sampler "halton"
-  "integer pixelsamples" 512
+Sampler "stratified"
+  #"integer pixelsamples" 16
+  "integer xsamples" 4
+  "integer ysamples" 4
 LookAt 0 0 6
        0 0 0
        0 1 0
@@ -75,7 +77,7 @@ AttributeBegin
     MediumInterface "macrofacet" ""
     #MediumInterface "homo" ""
     #Material "diffuse"
-    #Material "conductor" "float roughness" [ 0.25 ] "rgb reflectance" [1.0 1.0 1.0]
+    #Material "conductor" "float roughness" [ 0.25 ] "rgb reflectance" [1.0 1.0 1.0] "string ndf" "beckmann"
     Shape "sphere" "float radius" [ 1.03 ]
   AttributeEnd
 AttributeEnd

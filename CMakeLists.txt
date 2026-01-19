@@ -1061,6 +1061,24 @@ add_sanitizers (macrofcaet_vdb_generator)
 set_property (TARGET macrofcaet_vdb_generator PROPERTY FOLDER "cmd")
 
 ######################
+# test_macrofacet
+
+add_executable (test_macrofacet src/pbrt/cmd/test_macrofacet.cpp)
+add_executable (pbrt::test_macrofacet ALIAS test_macrofacet)
+
+target_compile_definitions (test_macrofacet PRIVATE ${PBRT_DEFINITIONS})
+target_compile_options (test_macrofacet PUBLIC ${PBRT_CXX_FLAGS})
+target_include_directories (test_macrofacet PUBLIC src src/ext)
+target_link_libraries (test_macrofacet PRIVATE ${ALL_PBRT_LIBS} pbrt_warnings pbrt_opt)
+
+set_target_properties (test_macrofacet PROPERTIES OUTPUT_NAME test_macrofacet)
+
+add_sanitizers (test_macrofacet)
+
+set_property (TARGET test_macrofacet PROPERTY FOLDER "cmd")
+
+
+######################
 # cyhair2pbrt
 
 add_executable (cyhair2pbrt src/pbrt/cmd/cyhair2pbrt.cpp)

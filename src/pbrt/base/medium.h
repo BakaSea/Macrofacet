@@ -19,25 +19,24 @@ namespace pbrt {
 
 // PhaseFunctionSample Definition
 struct PhaseFunctionSample {
-    Float p;
+    SampledSpectrum p;
     Vector3f wi;
     Float pdf;
 };
 
 // PhaseFunction Definition
 class HGPhaseFunction;
-class SGGXPhaseFunction;
 class SpecularPhaseFunction;
 
 class PhaseFunction
-    : public TaggedPointer<HGPhaseFunction, SGGXPhaseFunction, SpecularPhaseFunction> {
+    : public TaggedPointer<HGPhaseFunction, SpecularPhaseFunction> {
   public:
     // PhaseFunction Interface
     using TaggedPointer::TaggedPointer;
 
     std::string ToString() const;
 
-    PBRT_CPU_GPU inline Float p(Vector3f wo, Vector3f wi) const;
+    PBRT_CPU_GPU inline SampledSpectrum p(Vector3f wo, Vector3f wi) const;
 
     PBRT_CPU_GPU inline pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo,
                                                                      Point2f u) const;
@@ -45,7 +44,6 @@ class PhaseFunction
     PBRT_CPU_GPU inline Float PDF(Vector3f wo, Vector3f wi) const;
 };
 
-class FuzzyMedium;
 class SphereMacrofacet;
 class HomogeneousMedium;
 class GridMedium;
@@ -90,7 +88,7 @@ struct MediumSample {
 // Medium Definition
 class Medium
     : public TaggedPointer<  // Medium Types
-                   FuzzyMedium, SphereMacrofacet, HomogeneousMedium, GridMedium,
+                   SphereMacrofacet, HomogeneousMedium, GridMedium,
                    RGBGridMedium, CloudMedium, NanoVDBMedium, MacrofacetVDBMedium
 
           > {

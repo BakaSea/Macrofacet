@@ -48,17 +48,17 @@ class HGPhaseFunction {
     HGPhaseFunction(Float g) : g(g) {}
 
     PBRT_CPU_GPU
-    Float p(Vector3f wo, Vector3f wi) const { return HenyeyGreenstein(Dot(wo, wi), g); }
+    SampledSpectrum p(Vector3f wo, Vector3f wi) const { return SampledSpectrum(HenyeyGreenstein(Dot(wo, wi), g)); }
 
     PBRT_CPU_GPU
     pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
         Float pdf;
         Vector3f wi = SampleHenyeyGreenstein(wo, g, u, &pdf);
-        return PhaseFunctionSample{pdf, wi, pdf};
+        return PhaseFunctionSample{SampledSpectrum(pdf), wi, pdf};
     }
 
     PBRT_CPU_GPU
-    Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi); }
+    Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi)[0]; }
 
     static const char *Name() { return "Henyey-Greenstein"; }
 
@@ -69,175 +69,21 @@ class HGPhaseFunction {
     Float g;
 };
 
-struct SGGX {
-    Float S_xx, S_xy, S_xz, S_yy, S_yz, S_zz;
-    SGGX() = default;
-
-    PBRT_CPU_GPU
-    SGGX(Float roughness) {
-        S_xx = S_yy = roughness * roughness;
-        S_zz = 1.f;
-        S_xy = S_xz = S_yz = 0.f;
-    }
-
-    PBRT_CPU_GPU
-    Float Sigma(Vector3f wi) const {
-        const Float sigmaSquared =
-            wi.x * wi.x * S_xx + wi.y * wi.y * S_yy + wi.z * wi.z * S_zz +
-            2.f * (wi.x * wi.y * S_xy + wi.x * wi.z * S_xz + wi.y * wi.z * S_yz);
-        return (sigmaSquared > 0.f) ? sqrtf(sigmaSquared) : 0.f;
-    }
-
-    PBRT_CPU_GPU
-    Float D(Vector3f wm) const {
-        const Float detS = S_xx * S_yy * S_zz - S_xx * S_yz * S_yz - S_yy * S_xz * S_xz -
-                           S_zz * S_xy * S_xy + 2.f * S_xy * S_xz * S_yz;
-        const Float den = wm.x * wm.x * (S_yy * S_zz - S_yz * S_yz) +
-                          wm.y * wm.y * (S_xx * S_zz - S_xz * S_xz) +
-                          wm.z * wm.z * (S_xx * S_yy - S_xy * S_xy) +
-                          2.0f * (wm.x * wm.y * (S_xz * S_yz - S_zz * S_xy) +
-                                  wm.x * wm.z * (S_xy * S_yz - S_yy * S_xz) +
-                                  wm.y * wm.z * (S_xy * S_xz - S_xx * S_yz));
-        const Float D = powf(fabsf(detS), 1.5f) / (Pi * den * den);
-        return D;
-    }
-
-    PBRT_CPU_GPU
-    Float EvalSpecular(Vector3f wi, Vector3f wo) const {
-        Vector3f wh = Normalize(wi + wo);
-        return 0.25f * D(wh) / Sigma(wi);
-    }
-
-    PBRT_CPU_GPU
-    void buildOrthonormalBasis(Vector3f &omega_1, Vector3f &omega_2,
-                               const Vector3f &omega_3) const {
-        if (omega_3.z < -0.9999999f) {
-            omega_1 = Vector3f(0.0f, -1.0f, 0.0f);
-            omega_2 = Vector3f(-1.0f, 0.0f, 0.0f);
-        } else {
-            const float a = 1.0f / (1.0f + omega_3.z);
-            const float b = -omega_3.x * omega_3.y * a;
-            omega_1 = Vector3f(1.0f - omega_3.x * omega_3.x * a, b, -omega_3.x);
-            omega_2 = Vector3f(b, 1.0f - omega_3.y * omega_3.y * a, -omega_3.y);
-        }
-    }
-
-    PBRT_CPU_GPU
-    Vector3f SampleVNDF(Vector3f wi, Float u1, Float u2) const {
-        // generate sample (u, v, w)
-        const Float r = sqrtf(u1);
-        const Float phi = 2.0f * Pi * u2;
-        const Float u = r * cosf(phi);
-        const Float v = r * sinf(phi);
-        const Float w = sqrtf(1.0f - u * u - v * v);
-        // build orthonormal basis
-        Vector3f wk, wj;
-        buildOrthonormalBasis(wk, wj, wi);
-        // project S in this basis
-        const Float S_kk =
-            wk.x * wk.x * S_xx + wk.y * wk.y * S_yy + wk.z * wk.z * S_zz +
-            2.0f * (wk.x * wk.y * S_xy + wk.x * wk.z * S_xz + wk.y * wk.z * S_yz);
-        const Float S_jj =
-            wj.x * wj.x * S_xx + wj.y * wj.y * S_yy + wj.z * wj.z * S_zz +
-            2.0f * (wj.x * wj.y * S_xy + wj.x * wj.z * S_xz + wj.y * wj.z * S_yz);
-        const Float S_ii =
-            wi.x * wi.x * S_xx + wi.y * wi.y * S_yy + wi.z * wi.z * S_zz +
-            2.0f * (wi.x * wi.y * S_xy + wi.x * wi.z * S_xz + wi.y * wi.z * S_yz);
-        const Float S_kj = wk.x * wj.x * S_xx + wk.y * wj.y * S_yy + wk.z * wj.z * S_zz +
-                           (wk.x * wj.y + wk.y * wj.x) * S_xy +
-                           (wk.x * wj.z + wk.z * wj.x) * S_xz +
-                           (wk.y * wj.z + wk.z * wj.y) * S_yz;
-        const Float S_ki = wk.x * wi.x * S_xx + wk.y * wi.y * S_yy + wk.z * wi.z * S_zz +
-                           (wk.x * wi.y + wk.y * wi.x) * S_xy +
-                           (wk.x * wi.z + wk.z * wi.x) * S_xz +
-                           (wk.y * wi.z + wk.z * wi.y) * S_yz;
-        const Float S_ji = wj.x * wi.x * S_xx + wj.y * wi.y * S_yy + wj.z * wi.z * S_zz +
-                           (wj.x * wi.y + wj.y * wi.x) * S_xy +
-                           (wj.x * wi.z + wj.z * wi.x) * S_xz +
-                           (wj.y * wi.z + wj.z * wi.y) * S_yz;
-        // compute normal
-        Float sqrtDetSkji =
-            sqrtf(fabsf(S_kk * S_jj * S_ii - S_kj * S_kj * S_ii - S_ki * S_ki * S_jj -
-                        S_ji * S_ji * S_kk + 2.0f * S_kj * S_ki * S_ji));
-        Float inv_sqrtS_ii = 1.0f / sqrtf(S_ii);
-        Float tmp = sqrtf(S_jj * S_ii - S_ji * S_ji);
-        Vector3f Mk(sqrtDetSkji / tmp, 0.0f, 0.0f);
-        Vector3f Mj(-inv_sqrtS_ii * (S_ki * S_ji - S_kj * S_ii) / tmp, inv_sqrtS_ii * tmp,
-                    0);
-        Vector3f Mi(inv_sqrtS_ii * S_ki, inv_sqrtS_ii * S_ji, inv_sqrtS_ii * S_ii);
-        Vector3f wm_kji = Normalize(u * Mk + v * Mj + w * Mi);
-        // rotate back to world basis
-        return Normalize(wm_kji.x * wk + wm_kji.y * wj + wm_kji.z * wi);
-    }
-
-    Vector3f SampleSpecular(Vector3f wi, Point2f u) const {
-        wi = Normalize(wi);
-        // sample VNDF
-        const Vector3f wm = SampleVNDF(wi, u.x, u.y);
-        // specular reflection
-        const Vector3f wo = Normalize(Reflect(wi, wm));
-        return wo;
-    }
-
-};
-
-class SGGXPhaseFunction {
-  public:
-    SGGXPhaseFunction() = default;
-    PBRT_CPU_GPU
-    SGGXPhaseFunction(Float roughness) : sggx(roughness) {
-
-    }
-
-    PBRT_CPU_GPU
-    Float p(Vector3f wo, Vector3f wi) const {
-        return sggx.EvalSpecular(wo, wi);
-    }
-
-    PBRT_CPU_GPU
-    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
-        Vector3f wi = sggx.SampleSpecular(wo, u);
-        Float pdf = p(wo, wi);
-        return PhaseFunctionSample{pdf, wi, pdf};
-    }
-
-    PBRT_CPU_GPU
-    Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi); }
-
-    static const char *Name() { return "SGGX"; }
-
-    std::string ToString() const;
-
-  private:
-    SGGX sggx;
-};
-
 class SpecularPhaseFunction {
   public:
     SpecularPhaseFunction() = default;
     PBRT_CPU_GPU
-    SpecularPhaseFunction(const NormalDistribution &distrib, const Frame &frame)
-        : distrib(distrib), frame(frame) {}
+    SpecularPhaseFunction(const SampledSpectrum& albedo, const NormalDistribution &distrib, const Frame &frame)
+        : albedo(albedo), distrib(distrib), frame(frame) {}
 
     PBRT_CPU_GPU
-    Float p(Vector3f wo, Vector3f wi) const {
-        wo = frame.ToLocal(wo);
-        wi = frame.ToLocal(wi);
-        // half vector
-        const Vector3f wh = Normalize(wi + wo);
-        //if (wh.z < 0.0f)
-        //    return 0.0f;
-
-        // value
-        const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
-        return value;
-    }
+    SampledSpectrum p(Vector3f wo, Vector3f wi) const;
 
     PBRT_CPU_GPU
     pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const;
 
     PBRT_CPU_GPU
-    Float PDF(Vector3f wo, Vector3f wi) const { return p(wo, wi); }
+    Float PDF(Vector3f wo, Vector3f wi) const;
 
     static const char *Name() { return "Specular"; }
 
@@ -246,6 +92,7 @@ class SpecularPhaseFunction {
   private:
     NormalDistribution distrib;
     Frame frame;
+    SampledSpectrum albedo;
 };
 
 // MediumProperties Definition
@@ -390,60 +237,6 @@ class DDAMajorantIterator {
     const MajorantGrid *grid;
     Float nextCrossingT[3], deltaT[3];
     int step[3], voxelLimit[3], voxel[3];
-};
-
-class FuzzyMedium {
-  public:
-    using MajorantIterator = HomogeneousMajorantIterator;
-
-    FuzzyMedium(const Transform &renderFromMedium, Spectrum albedo, Float k,
-                Float roughness, Float sigma, Allocator alloc)
-        : renderFromMedium(renderFromMedium),
-          albedo_spec(albedo, alloc),
-          k(k),
-          sggx(roughness),
-          sigma(sigma),
-          phase(roughness) {}
-
-    static FuzzyMedium *Create(const ParameterDictionary &parameters,
-                               const Transform &renderFromMedium, const FileLoc *loc,
-                               Allocator alloc);
-
-    PBRT_CPU_GPU
-    bool IsEmissive() const { return false; }
-
-    PBRT_CPU_GPU
-    Float Density(Point3f p) const;
-
-    PBRT_CPU_GPU
-    MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
-        Error("SamplePoint No implement!");
-        return MediumProperties{};
-    }
-
-    PBRT_CPU_GPU
-    MediumProperties SamplePoint(Point3f p, Vector3f wo,
-                                 const SampledWavelengths &lambda) const;
-
-    PBRT_CPU_GPU
-    HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
-                                          const SampledWavelengths &lambda) const;
-
-    PBRT_CPU_GPU
-    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
-                                const SampledWavelengths &lambda) const;
-
-    PBRT_CPU_GPU
-    SampledSpectrum EvalTransmittance(Point3f x, Point3f y, const SampledWavelengths &lambda) const;
-
-    std::string ToString() const;
-
-  private:
-    Transform renderFromMedium;
-    DenselySampledSpectrum albedo_spec;
-    SGGXPhaseFunction phase;
-    SGGX sggx;
-    Float k, sigma;
 };
 
 class SphereMacrofacet {
@@ -1117,7 +910,7 @@ class MacrofacetVDBMedium {
     const nanovdb::FloatGrid *sdfFloatGrid = nullptr;
 };
 
-PBRT_CPU_GPU inline Float PhaseFunction::p(Vector3f wo, Vector3f wi) const {
+PBRT_CPU_GPU inline SampledSpectrum PhaseFunction::p(Vector3f wo, Vector3f wi) const {
     auto p = [&](auto ptr) { return ptr->p(wo, wi); };
     return Dispatch(p);
 }

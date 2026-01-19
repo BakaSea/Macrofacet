@@ -478,17 +478,7 @@ class GPDistribution {
     Float D(Vector3f wm) const;
 
     PBRT_CPU_GPU
-    inline Float D(Vector3f wi, Vector3f wm) const {
-        // normalization coefficient
-        const Float projectedarea = projectedArea(wi);
-        if (projectedarea == 0)
-            return 0;
-        const Float c = 1.0f / projectedarea;
-
-        // value
-        const Float value = c * std::max(0.0f, Dot(wi, wm)) * D(wm);
-        return value;
-    }
+    Float D(Vector3f wi, Vector3f wm) const;
 
     PBRT_CPU_GPU
     inline double alpha_i(Vector3f wi) const {
@@ -514,11 +504,6 @@ class GPDistribution {
 
     PBRT_CPU_GPU
     Float projectedArea(Vector3f wi) const {
-        if (wi.z > 0.9999f)
-            return 1.0f;
-        if (wi.z < -0.9999f)
-            return 0.0f;
-
         // a
         const double alphai = alpha_i(wi);
         const double a = wi.z / alphai;
@@ -531,15 +516,7 @@ class GPDistribution {
     }
 
     PBRT_CPU_GPU
-    Vector3f Sample_wm(Vector3f wi, Point2f u) const {
-        Float x = SampleNormal(u.x, 0.f, alpha_x / Sqrt2);
-        Float y = SampleNormal(u.y, 0.f, alpha_y / Sqrt2);
-        RNG rng;
-        Float z = SampleNormal(rng.Uniform<Float>(), 1.f, alpha_z / Sqrt2);
-        Vector3f wm(x, y, z);
-        wm = Normalize(wm);
-        return wm;
-    }
+    Vector3f Sample_wm(Vector3f wi, Point2f u) const;
 
     PBRT_CPU_GPU
     static Float RoughnessToAlpha(Float roughness) { return std::sqrt(roughness); }
@@ -554,7 +531,6 @@ class GPDistribution {
 
     std::string ToString() const;
 
-  private:
     Float alpha_x, alpha_y, alpha_z;
 };
 
@@ -702,7 +678,6 @@ class NormalDistribution {
     }
 
     NormalDistributionType type;
-  private:
     union {
         TrowbridgeReitzDistribution ggx;
         BeckmannDistribution beckmann;

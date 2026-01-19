@@ -66,28 +66,56 @@ std::string DDAMajorantIterator::ToString() const {
                         voxel[0], voxel[1], voxel[2], grid);
 }
 
-std::string SGGXPhaseFunction::ToString() const {
-    return StringPrintf("[ SGGXPhaseFunction ]");
+PBRT_CPU_GPU
+SampledSpectrum SpecularPhaseFunction::p(Vector3f wo, Vector3f wi) const {
+    wo = frame.ToLocal(wo);
+    wi = frame.ToLocal(wi);
+    // half vector
+    const Vector3f wh = Normalize(wi + wo);
+    //if (wh.z < 0.0f)
+    //    return 0.0f;
+
+    // value
+    const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
+    SampledSpectrum F =
+        albedo * Lerp(powf(1.f - Dot(wo, wh), 5.f), albedo, SampledSpectrum(1.f));
+    return SampledSpectrum(value);
 }
 
-PBRT_CPU_GPU pstd::optional<PhaseFunctionSample> SpecularPhaseFunction::Sample_p(
+PBRT_CPU_GPU
+pstd::optional<PhaseFunctionSample> SpecularPhaseFunction::Sample_p(
     Vector3f wo, Point2f u) const {
     Vector3f localWo = frame.ToLocal(wo);
     Vector3f wm = distrib.Sample_wm(localWo, u);
 
     // reflect
-    //if (!SameHemisphere(localWo, wm)) {
+    //if (Dot(localWo, wm) < 0)
     //    return {};
-    //}
-    Vector3f localWi = -localWo + 2.0f * wm * Dot(localWo, wm);
+    Vector3f localWi = Reflect(localWo, wm);
     Vector3f wi = frame.FromLocal(localWi);
-    Float phaseVal = p(wo, wi);
+    SampledSpectrum phaseVal = p(wo, wi);
     if (distrib.type == GP) {
-        Float pdf = distrib.D(wm) / (4.f * Dot(localWi, wm));
+        Float pdf = 0.25f * Inv2Pi / Dot(localWo, wm);
+        //Float pdf = 0.25f * distrib.D(wm) / Dot(localWo, wm);
         return PhaseFunctionSample{phaseVal, wi, pdf};
     } else {
-        return PhaseFunctionSample{phaseVal, wi, phaseVal};
+        Float pdf = PDF(wo, wi);
+        return PhaseFunctionSample{phaseVal, wi, pdf};
     }
+}
+
+PBRT_CPU_GPU
+Float SpecularPhaseFunction::PDF(Vector3f wo, Vector3f wi) const {
+    wo = frame.ToLocal(wo);
+    wi = frame.ToLocal(wi);
+    // half vector
+    const Vector3f wh = Normalize(wi + wo);
+    // if (wh.z < 0.0f)
+    //     return 0.0f;
+
+    // value
+    const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
+    return value;
 }
 
 std::string SpecularPhaseFunction::ToString() const {
@@ -191,116 +219,6 @@ std::string Medium::ToString() const {
     return DispatchCPU(ts);
 }
 
-FuzzyMedium *FuzzyMedium::Create(const ParameterDictionary &parameters,
-                                 const Transform &renderFromMedium, const FileLoc *loc,
-                                 Allocator alloc) {
-    Spectrum albedo = nullptr;
-    if (!albedo) {
-        albedo =
-            parameters.GetOneSpectrum("albedo", nullptr, SpectrumType::Albedo, alloc);
-        if (!albedo)
-            albedo = alloc.new_object<ConstantSpectrum>(1.f);
-    }
-    Float k = parameters.GetOneFloat("k", 1.f);
-    Float roughness = parameters.GetOneFloat("roughness", 1.f);
-    Float sigma = parameters.GetOneFloat("sigma", 1.f/3.f);
-    return alloc.new_object<FuzzyMedium>(renderFromMedium, albedo, k, roughness, sigma, alloc);
-}
-
-PBRT_CPU_GPU
-Float FuzzyMedium::Density(Point3f p) const {
-    Float d = p.z;
-    Float pdf = Gaussian(d, 0.f, sigma);
-    Float cdf = 0.5f * (1.f + erf(d / (sigma * std::sqrt(2.f))));
-    return k * pdf / cdf;
-}
-
-PBRT_CPU_GPU MediumProperties
-FuzzyMedium::SamplePoint(Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
-    p = renderFromMedium.ApplyInverse(p);
-    wo = renderFromMedium.ApplyInverse(wo);
-    Float rou = Density(p);
-    Float maxRou = Density(Point3f(0.f, 0.f, -3.f * sigma));
-    if (maxRou < rou) {
-        rou = maxRou;
-    }
-    Float projectedArea = sggx.Sigma(wo);
-    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
-    SampledSpectrum albedo = albedo_spec.Sample(lambda);
-    SampledSpectrum sigma_s = albedo * sigma_t;
-    SampledSpectrum sigma_a = sigma_t - sigma_s;
-    return MediumProperties{sigma_a, sigma_s, &phase, SampledSpectrum(0.f)};
-}
-
-PBRT_CPU_GPU HomogeneousMajorantIterator
-FuzzyMedium::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
-    ray = renderFromMedium.ApplyInverse(ray);
-    Float maxRou = Density(Point3f(0.f, 0.f, -3.f * sigma));
-    Float projectedArea = sggx.Sigma(-ray.d);
-    SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
-    return HomogeneousMajorantIterator(0, tMax, sigma_maj);
-}
-
-PBRT_CPU_GPU
-MediumSample FuzzyMedium::SampleDistance(Ray ray, Float tMax, Float u,
-                                         const SampledWavelengths &lambda) const {
-    tMax *= Length(ray.d);
-    if (tMax < FLT_EPSILON)
-        return MediumSample(ray.o, SampledSpectrum(1), 1, false);
-    ray.d = Normalize(ray.d);
-    Ray mRay = renderFromMedium.ApplyInverse(ray, &tMax);
-    CHECK(mRay.d.z != 0);
-    Float sv = sigma * sqrtf(2.f);
-    Float erfD0 = erff(mRay.o.z / sv);
-    Float erfStep = -2.f * AbsCosTheta(mRay.d) * logf(1.f - u) / (k * sggx.Sigma(mRay.d));
-    Float erfD1 = erfD0 + copysignf(1.f, CosTheta(mRay.d)) * erfStep;
-    if (erfD1 <= -1.f || erfD1 >= 1.f) {
-        Point3f p = ray(tMax);
-        SampledSpectrum Tr = EvalTransmittance(ray.o, p, lambda);
-        return MediumSample(p, SampledSpectrum(1), 1, false);
-    }
-    Float depth = sv * ErfInv(erfD1);
-    Float t = (depth - mRay.o.z) / mRay.d.z;
-    if (t >= tMax) {
-        Point3f p = ray(tMax);
-        SampledSpectrum Tr = EvalTransmittance(ray.o, p, lambda);
-        return MediumSample(p, SampledSpectrum(1), 1, false);
-    }
-    Point3f p = mRay(t);
-    Point3f rp = ray(t);
-    Float Tr = 1.f - u;
-    Float rou = Density(p);
-    Float projectedArea = sggx.Sigma(mRay.d);
-    Float sigma_t = rou * projectedArea;
-    Float pdf = sigma_t * Tr/* * AbsCosTheta(mRay.d)*/;
-    CHECK(!IsNaN(Tr));
-    CHECK(!IsNaN(pdf));
-    CHECK(pdf != 0);
-    return MediumSample(rp, SampledSpectrum(Tr), pdf, true);
-}
-
-PBRT_CPU_GPU
-SampledSpectrum FuzzyMedium::EvalTransmittance(Point3f x, Point3f y,
-                                               const SampledWavelengths &lambda) const {
-    x = renderFromMedium.ApplyInverse(x);
-    y = renderFromMedium.ApplyInverse(y);
-    Float sv = sigma * sqrtf(2.f);
-    Float erfY = erff(y.z / sv), erfX = erff(x.z / sv);
-    Vector3f wi = y - x;
-    if (Length(wi) < FLT_EPSILON)
-        return SampledSpectrum(1.f);
-    wi = Normalize(wi);
-    if (wi.z == 0)
-        return SampledSpectrum(1.f);
-    Float coeff = -k * sggx.Sigma(wi) * fabs(erfY - erfX) / (2.f * AbsCosTheta(wi));
-    CHECK(!IsNaN(FastExp(coeff)));
-    return SampledSpectrum(FastExp(coeff));
-}
-
-std::string FuzzyMedium::ToString() const {
-    return StringPrintf("[ Fuzzy medium ]");
-}
-
 SphereMacrofacet *SphereMacrofacet::Create(const ParameterDictionary &parameters,
                                            const Transform &renderFromMedium,
                                            const FileLoc *loc, Allocator alloc) {
@@ -358,10 +276,12 @@ PBRT_CPU_GPU MediumProperties SphereMacrofacet::SamplePoint(
     //Float projectedArea = 1.f;
     SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
     SampledSpectrum albedo = albedo_spec.Sample(lambda);
-    SampledSpectrum sigma_s = albedo * sigma_t;
-    SampledSpectrum sigma_a = sigma_t - sigma_s;
+    //SampledSpectrum sigma_s = albedo * sigma_t;
+    //SampledSpectrum sigma_a = sigma_t - sigma_s;
+    SampledSpectrum sigma_s = sigma_t;
+    SampledSpectrum sigma_a(0.f);
 
-    SpecularPhaseFunction *phase = new SpecularPhaseFunction(ndf, frame);
+    SpecularPhaseFunction *phase = new SpecularPhaseFunction(albedo, ndf, frame);
     return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
 }
 
@@ -370,8 +290,8 @@ SphereMacrofacet::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambd
     ray = renderFromMedium.ApplyInverse(ray);
     Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
     //Float maxRou = 1.f;
-    //Float projectedArea = ndf.projectedArea(-ray.d);
-    Float projectedArea = 1.f;
+    Float projectedArea = ndf.projectedArea(Vector3f(0.f, 0.f, 1.f));
+    //Float projectedArea = 1;
     SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
     return HomogeneousMajorantIterator(0, tMax, sigma_maj);
 }
@@ -1042,7 +962,7 @@ MediumProperties MacrofacetVDBMedium::SamplePoint(
     SampledSpectrum sigma_s = albedo * sigma_t;
     SampledSpectrum sigma_a = sigma_t - sigma_s;
 
-    SpecularPhaseFunction *phase = new SpecularPhaseFunction(ndf, frame);
+    SpecularPhaseFunction *phase = new SpecularPhaseFunction(albedo, ndf, frame);
 
     return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
 }
@@ -1112,8 +1032,6 @@ Medium Medium::Create(const std::string &name, const ParameterDictionary &parame
         m = CloudMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "nanovdb") {
         m = NanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
-    } else if (name == "fuzzy") {
-        m = FuzzyMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "spheremacrofacet") {
         m = SphereMacrofacet::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "macrofacetvdb") {
