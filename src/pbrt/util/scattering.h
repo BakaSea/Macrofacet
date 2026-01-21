@@ -444,7 +444,6 @@ class BeckmannDistribution {
 
     std::string ToString() const;
 
-  private:
     Float alpha_x, alpha_y;
 };
 
@@ -452,17 +451,17 @@ class GPDistribution {
   public:
     GPDistribution() = default;
     PBRT_CPU_GPU
-    GPDistribution(Float ax, Float ay, Float az) : alpha_x(ax), alpha_y(ay), alpha_z(az) {
+    GPDistribution(Float ax, Float ay, Float az) : beckmann(ax, ay), alpha_z(az) {
         if (!EffectivelySmooth()) {
-            alpha_x = std::max<Float>(alpha_x, 1e-4f);
-            alpha_y = std::max<Float>(alpha_y, 1e-4f);
+            beckmann.alpha_x = std::max<Float>(beckmann.alpha_x, 1e-4f);
+            beckmann.alpha_y = std::max<Float>(beckmann.alpha_y, 1e-4f);
             alpha_z = std::max<Float>(alpha_z, 1e-4f);
         }
     }
 
     PBRT_CPU_GPU
     bool EffectivelySmooth() const {
-        return std::max(alpha_x, std::max(alpha_y, alpha_z)) < 1e-3f;
+        return std::max(beckmann.alpha_x, std::max(beckmann.alpha_y, alpha_z)) < 1e-3f;
     }
 
     PBRT_CPU_GPU
@@ -482,8 +481,8 @@ class GPDistribution {
 
     PBRT_CPU_GPU
     inline double alpha_i(Vector3f wi) const {
-        return std::sqrt(alpha_x * alpha_x * wi.x * wi.x +
-                         alpha_y * alpha_y * wi.y * wi.y +
+        return std::sqrt(beckmann.alpha_x * beckmann.alpha_x * wi.x * wi.x +
+                         beckmann.alpha_y * beckmann.alpha_y * wi.y * wi.y +
                          alpha_z * alpha_z * wi.z * wi.z);
     }
 
@@ -504,6 +503,8 @@ class GPDistribution {
 
     PBRT_CPU_GPU
     Float projectedArea(Vector3f wi) const {
+        if (beckmann.alpha_x == 0.f && beckmann.alpha_y == 0.f)
+            return 0.f;
         // a
         const double alphai = alpha_i(wi);
         const double a = wi.z / alphai;
@@ -512,26 +513,23 @@ class GPDistribution {
         const double value = 0.5 * (erf(a) + 1.0) * wi.z +
                              1.0 / (2.0 * std::sqrt(Pi)) * alphai * exp(-a * a);
 
-        return std::min<Float>(value, 1.f);
+        return value;
     }
 
     PBRT_CPU_GPU
-    Vector3f Sample_wm(Vector3f wi, Point2f u) const;
+    std::pair<Vector3f, Float> Sample_wm(Vector3f wi, Point2f u) const;
 
     PBRT_CPU_GPU
     static Float RoughnessToAlpha(Float roughness) { return std::sqrt(roughness); }
 
     PBRT_CPU_GPU
-    void Regularize() {
-        if (alpha_x < 0.3f)
-            alpha_x = Clamp(2 * alpha_x, 0.1f, 0.3f);
-        if (alpha_y < 0.3f)
-            alpha_y = Clamp(2 * alpha_y, 0.1f, 0.3f);
+    void Regularize() { beckmann.Regularize();
     }
 
     std::string ToString() const;
 
-    Float alpha_x, alpha_y, alpha_z;
+    BeckmannDistribution beckmann;
+    Float alpha_z;
 };
 
 class NormalDistribution {
@@ -637,16 +635,16 @@ class NormalDistribution {
     }
 
     PBRT_CPU_GPU
-    Vector3f Sample_wm(Vector3f w, Point2f u) const {
+    std::pair<Vector3f, Float> Sample_wm(Vector3f w, Point2f u) const {
         switch (type) {
         case pbrt::GGX:
-            return ggx.Sample_wm(w, u);
+            return {ggx.Sample_wm(w, u), 1.f};
         case pbrt::Beckmann:
-            return beckmann.Sample_wm(w, u);
+            return {beckmann.Sample_wm(w, u), 1.f};
         case pbrt::GP:
             return gp.Sample_wm(w, u);
         default:
-            return Vector3f(0.f, 0.f, 0.f);
+            return {Vector3f(0.f, 0.f, 0.f), 0.f};
         }
     }
 

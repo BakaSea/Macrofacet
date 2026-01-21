@@ -79,27 +79,28 @@ SampledSpectrum SpecularPhaseFunction::p(Vector3f wo, Vector3f wi) const {
     const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
     SampledSpectrum F =
         albedo * Lerp(powf(1.f - Dot(wo, wh), 5.f), albedo, SampledSpectrum(1.f));
-    return SampledSpectrum(albedo*value);
+    return SampledSpectrum(albedo * value);
 }
 
 PBRT_CPU_GPU
 pstd::optional<PhaseFunctionSample> SpecularPhaseFunction::Sample_p(
     Vector3f wo, Point2f u) const {
     Vector3f localWo = frame.ToLocal(wo);
-    Vector3f wm = distrib.Sample_wm(localWo, u);
+    auto [wm, pdf] = distrib.Sample_wm(localWo, u);
 
-    // reflect
-    //if (Dot(localWo, wm) < 0)
-    //    return {};
+    // reflectW
     Vector3f localWi = Reflect(localWo, wm);
     Vector3f wi = frame.FromLocal(localWi);
-    SampledSpectrum phaseVal = p(wo, wi);
+
+    const Float value = 0.25f * distrib.D(localWo, wm) / Dot(localWo, wm);
+
+    SampledSpectrum phaseVal = albedo * value;
     if (distrib.type == GP) {
-        Float pdf = 0.25f * Inv2Pi / Dot(localWo, wm);
-        //Float pdf = 0.25f * distrib.D(wm) / Dot(localWo, wm);
+        pdf /= 4.f * Dot(localWo, wm);
+        //Float pdf = 0.25f * InvPi;
         return PhaseFunctionSample{phaseVal, wi, pdf};
     } else {
-        Float pdf = PDF(wo, wi);
+        pdf = PDF(wo, wi);
         return PhaseFunctionSample{phaseVal, wi, pdf};
     }
 }
@@ -1153,7 +1154,7 @@ DDAMajorantIterator MacrofacetVDBMedium::SampleRay(
         return {};
     DCHECK_LE(tMax, raytMax);
 
-    SampledSpectrum sigma_t = SampledSpectrum(1.f);
+    SampledSpectrum sigma_t = SampledSpectrum(1.2f);
 
     return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
 }

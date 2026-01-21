@@ -1,7 +1,5 @@
-Sampler "stratified"
-  #"integer pixelsamples" 16
-  "integer xsamples" 4
-  "integer ysamples" 4
+Sampler "halton"
+  "integer pixelsamples" 64
 LookAt 0 0 6
        0 0 0
        0 1 0

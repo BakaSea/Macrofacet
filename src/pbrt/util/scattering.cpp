@@ -41,17 +41,19 @@ std::string BeckmannDistribution::ToString() const {
 }
 
 PBRT_CPU_GPU
-Vector3f GPDistribution::Sample_wm(Vector3f wi, Point2f u) const {
-    Frame frame = Frame::FromZ(wi);
-    Vector3f wm = SampleUniformHemisphere(u);
-    wm = frame.FromLocal(wm);
-    //Float x = SampleNormal(u.x, 0.f, alpha_x / Sqrt2);
-    //Float y = SampleNormal(u.y, 0.f, alpha_y / Sqrt2);
-    //RNG rng;
-    //Float z = SampleNormal(rng.Uniform<Float>(), 1.f, alpha_z / Sqrt2);
-    //Vector3f wm(x, y, z);
-    //wm = Normalize(wm);
-    return wm;
+std::pair<Vector3f, Float> GPDistribution::Sample_wm(Vector3f wi, Point2f u) const {
+    RNG rng;
+    const Float t = 0.1f;
+    if (rng.Uniform<Float>() < t) {
+        Frame frame = Frame::FromZ(wi);
+        Vector3f wm = SampleUniformHemisphere(u);
+        wm = frame.FromLocal(wm);
+        return {wm, t * Inv2Pi + (1 - t) * beckmann.D(wi, wm)};
+    } else {
+        Vector3f wm = beckmann.Sample_wm(wi, u);
+        Float pdf = beckmann.D(wi, wm);
+        return {wm, t * Inv2Pi + (1 - t) * pdf};
+    }
 }
 
 PBRT_CPU_GPU
@@ -66,14 +68,15 @@ Float GPDistribution::D(Vector3f wm) const {
     //       (B / (2.0 * A * A) + sqrtPi / (4.0 * A * sqrtA) * exp(B * B / A) *
     //                                (2.0 * B * B / A + 1.f) * erfc(-B / sqrtA));
     double C = 1.f / (alpha_z * alpha_z);
-    double A = wm.x * wm.x / (alpha_x * alpha_x) + wm.y * wm.y / (alpha_y * alpha_y) +
-               wm.z * wm.z * C;
+    double A = wm.x * wm.x / (beckmann.alpha_x * beckmann.alpha_x) +
+               wm.y * wm.y / (beckmann.alpha_y * beckmann.alpha_y) + wm.z * wm.z * C;
     double B = wm.z * C;
     const double sqrtPi = std::sqrt(Pi);
     const double sqrtA = std::sqrt(A);
 
     double d =
-        1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z) * exp(-C + B * B / A) *
+        1.0 / (Pi * sqrtPi * beckmann.alpha_x * beckmann.alpha_y * alpha_z) *
+        exp(-C + B * B / A) *
         ((B * B / A + 1.0) / (2 * A * A) * exp(-B * B / A) +
          B * sqrtPi / (2.0 * A * A * sqrtA) * (1.5 + B * B / A) * erfc(-B / sqrtA));
 
@@ -87,14 +90,14 @@ Float GPDistribution::D(Vector3f wi, Vector3f wm) const {
         return 0;
 
     double C = 1.f / (alpha_z * alpha_z);
-    double A = wm.x * wm.x / (alpha_x * alpha_x) + wm.y * wm.y / (alpha_y * alpha_y) +
+    double A = wm.x * wm.x / (beckmann.alpha_x * beckmann.alpha_x) + wm.y * wm.y / (beckmann.alpha_y * beckmann.alpha_y) +
                wm.z * wm.z * C;
     double B = wm.z * C;
     const double sqrtPi = std::sqrt(Pi);
     const double sqrtA = std::sqrt(A);
 
     double d =
-        1.0 / (Pi * sqrtPi * alpha_x * alpha_y * alpha_z) * exp(-C + B * B / A) *
+        1.0 / (Pi * sqrtPi * beckmann.alpha_x * beckmann.alpha_y * alpha_z) * exp(-C + B * B / A) *
         ((B * B / A + 1.0) / (2 * A * A) * exp(-B * B / A) +
          B * sqrtPi / (2.0 * A * A * sqrtA) * (1.5 + B * B / A) * erfc(-B / sqrtA));
 
@@ -102,8 +105,8 @@ Float GPDistribution::D(Vector3f wi, Vector3f wm) const {
 }
 
 std::string GPDistribution::ToString() const {
-    return StringPrintf("[ GPDistribution alpha_x: %f alpha_y: %f ]", alpha_x, alpha_y,
-                        alpha_z);
+    return StringPrintf("[ GPDistribution alpha_x: %f alpha_y: %f ]", beckmann.alpha_x,
+                        beckmann.alpha_y, alpha_z);
 }
 
 }  // namespace pbrt

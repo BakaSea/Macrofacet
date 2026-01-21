@@ -1,5 +1,5 @@
 Sampler "halton"
-  "integer pixelsamples" 64
+  "integer pixelsamples" 750
 LookAt -2 2.5 7
        0 -0.3 0
        0 1 0
@@ -29,8 +29,8 @@ AttributeEnd
 
 AttributeBegin
   MakeNamedMedium "macrofacet" "string type" "macrofacetvdb"
-    "string ndf" "gp"
-    "string filename" "knob.nvdb"
+    "string ndf" "beckmann"
+    "string filename" "knob-high-res.nvdb"
     "rgb albedo" [0.15 0.5 0.8]
   AttributeBegin
     Material "interface"

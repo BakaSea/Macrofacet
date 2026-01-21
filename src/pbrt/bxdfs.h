@@ -308,7 +308,7 @@ class ConductorBxDF {
         // Sample microfacet normal $\wm$ and reflected direction $\wi$
         if (wo.z == 0)
             return {};
-        Vector3f wm = mfDistrib.Sample_wm(wo, u);
+        auto [wm, p] = mfDistrib.Sample_wm(wo, u);
         Vector3f wi = Reflect(wo, wm);
         if (!SameHemisphere(wo, wi))
             return {};

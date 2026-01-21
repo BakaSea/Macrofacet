@@ -348,7 +348,7 @@ int main() {
                 //printf("%d %d %d\n", i, j, k);
                 nanovdb::Vec3f xyz = grid->indexToWorldF(nanovdb::Vec3f(i, j, k));
                 float dist = knob(Vector3f(xyz[0], xyz[1], xyz[2]));
-                float intrSigma = 0.01f;
+                float intrSigma = 0.05f;
                 float intrAlpha = 0.5f;
                 if (-3.f * intrSigma < dist && dist < 3.f * intrSigma) {
                     float d = Density(dist, intrSigma, 1.f);
