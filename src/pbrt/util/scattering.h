@@ -262,7 +262,7 @@ class BeckmannDistribution {
 
         // normalization coefficient
         const Float projectedarea = projectedArea(wi);
-        if (projectedarea == 0)
+        if (projectedarea < FLT_EPSILON)
             return 0;
         const Float c = 1.0f / projectedarea;
 

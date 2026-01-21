@@ -3,6 +3,7 @@
 // SPDX: Apache-2.0
 
 #include <pbrt/util/scattering.h>
+#include <pbrt/options.h>
 
 namespace pbrt {
 
@@ -42,7 +43,7 @@ std::string BeckmannDistribution::ToString() const {
 
 PBRT_CPU_GPU
 std::pair<Vector3f, Float> GPDistribution::Sample_wm(Vector3f wi, Point2f u) const {
-    RNG rng;
+    RNG rng(Hash(GetOptions().seed, wi), Hash(u));
     const Float t = 0.1f;
     if (rng.Uniform<Float>() < t) {
         Frame frame = Frame::FromZ(wi);
