@@ -1,0 +1,42 @@
+Sampler "halton"
+  "integer pixelsamples" 64
+LookAt -2 2.5 7
+       0 -0.3 0
+       0 1 0
+
+Camera "perspective"
+    "float fov" 20
+
+Film "rgb"
+  "integer xresolution" 512
+  "integer yresolution" 512
+  "string filename" "knob.exr"
+
+Integrator "volpath"
+
+WorldBegin
+
+AttributeBegin
+LightSource "infinite" "rgb L" [1 1 1]
+AttributeEnd
+
+AttributeBegin
+Translate 0 -1.21 0
+Rotate 90 1 0 0
+Material "diffuse" "rgb reflectance" [0.2 0.2 0.2]
+Shape "disk" "float radius" 100
+AttributeEnd
+
+AttributeBegin
+  MakeNamedMedium "macrofacet" "string type" "macrofacetvdb"
+    "string ndf" "gp"
+    "string filename" "knob.nvdb"
+    "rgb albedo" [0.15 0.5 0.8]
+  AttributeBegin
+    Material "interface"
+    MediumInterface "macrofacet" ""
+    #Material "conductor" "string ndf" "beckmann" "bool remaproughness" false "float roughness" [ 0.1 ] "rgb reflectance" [0.15 0.5 0.8]
+    Scale 1.2 1.2 1.2
+    Shape "plymesh" "string filename" "cube.ply"
+  AttributeEnd
+AttributeEnd

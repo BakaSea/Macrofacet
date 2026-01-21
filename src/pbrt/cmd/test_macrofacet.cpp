@@ -14,7 +14,7 @@ int main() {
 
     NormalDistribution ndf(GP, 1.f, 1.f, 1.f);
     Frame frame;
-    SpecularPhaseFunction phase(ndf, frame);
+    SpecularPhaseFunction phase(SampledSpectrum(0.f), ndf, frame);
 
     //Vector3f wo = generateRandomDirection();
 
@@ -32,7 +32,7 @@ int main() {
     for (double theta = 0.f; theta <= Pi; theta += stepTheta) {
         for (double phi = 0.f; phi <= 2.f * Pi; phi += stepPhi) {
             Vector3f w(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-            result += stepTheta * stepPhi * sin(theta) * phase.p(wo, w);
+            result += stepTheta * stepPhi * sin(theta) * phase.PDF(wo, w);
         }
     }
     printf("p(wo, wi)=%lf\n", result);

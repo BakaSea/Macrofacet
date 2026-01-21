@@ -303,6 +303,67 @@ class SphereMacrofacet {
     Allocator alloc;
 };
 
+class KnobMacrofacet {
+  public:
+    using MajorantIterator = HomogeneousMajorantIterator;
+
+    KnobMacrofacet(const Transform &renderFromMedium, Spectrum albedo, Float sigma,
+                   NormalDistribution ndf, Allocator alloc)
+        : renderFromMedium(renderFromMedium),
+          albedo_spec(albedo, alloc),
+          sigma(sigma),
+          ndf(ndf),
+          alloc(alloc) {}
+
+    static KnobMacrofacet *Create(const ParameterDictionary &parameters,
+                                  const Transform &renderFromMedium, const FileLoc *loc,
+                                  Allocator alloc);
+
+    PBRT_CPU_GPU
+    bool IsEmissive() const { return false; }
+
+    PBRT_CPU_GPU
+    Float Density(Point3f p) const;
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
+        Error("SamplePoint No implement!");
+        return MediumProperties{};
+    }
+
+    PBRT_CPU_GPU
+    MediumProperties SamplePoint(Point3f p, Vector3f wo,
+                                 const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
+                                          const SampledWavelengths &lambda) const;
+
+    PBRT_CPU_GPU
+    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
+                                const SampledWavelengths &lambda) const {
+        return MediumSample();
+    }
+
+    PBRT_CPU_GPU
+    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
+                                      const SampledWavelengths &lambda) const {
+        return SampledSpectrum(0.f);
+    }
+
+    std::string ToString() const;
+
+  private:
+    PBRT_CPU_GPU
+    Normal3f Normal(Point3f p) const;
+
+    Transform renderFromMedium;
+    DenselySampledSpectrum albedo_spec;
+    NormalDistribution ndf;
+    Float sigma;
+    Allocator alloc;
+};
+
 // HomogeneousMedium Definition
 class HomogeneousMedium {
   public:
@@ -864,6 +925,7 @@ class MacrofacetVDBMedium {
     std::string ToString() const;
 
     MacrofacetVDBMedium(const Transform &renderFromMedium, Spectrum albedo,
+                        NormalDistributionType ndfType,
                         nanovdb::GridHandle<NanoVDBBuffer> dg,
                         nanovdb::GridHandle<NanoVDBBuffer> ag,
                         nanovdb::GridHandle<NanoVDBBuffer> sg, Allocator alloc);
@@ -901,6 +963,7 @@ class MacrofacetVDBMedium {
     Bounds3f bounds;
     Transform renderFromMedium;
     DenselySampledSpectrum albedo_spec;
+    NormalDistributionType ndfType;
     MajorantGrid majorantGrid;
     nanovdb::GridHandle<NanoVDBBuffer> densityGrid;
     nanovdb::GridHandle<NanoVDBBuffer> alphaGrid;
