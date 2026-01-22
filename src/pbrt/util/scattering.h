@@ -129,14 +129,14 @@ class TrowbridgeReitzDistribution {
     }
 
     PBRT_CPU_GPU inline Float D(Vector3f wm) const {
-        Float tan2Theta = Tan2Theta(wm);
-        if (IsInf(tan2Theta))
-            return 0;
-        Float cos4Theta = Sqr(Cos2Theta(wm));
-        if (cos4Theta < 1e-16f)
-            return 0;
-        Float e = tan2Theta * (Sqr(CosPhi(wm) / alpha_x) + Sqr(SinPhi(wm) / alpha_y));
-        return 1 / (Pi * alpha_x * alpha_y * cos4Theta * Sqr(1 + e));
+        if (wm.z <= 0.0f)
+            return 0.0f;
+        // slope of wm
+        const float slope_x = -wm.x / wm.z;
+        const float slope_y = -wm.y / wm.z;
+        // value
+        const float value = P22(slope_x, slope_y) / (wm.z * wm.z * wm.z * wm.z);
+        return value;
     }
 
     PBRT_CPU_GPU
@@ -146,12 +146,35 @@ class TrowbridgeReitzDistribution {
     Float G1(Vector3f w) const { return 1 / (1 + Lambda(w)); }
 
     PBRT_CPU_GPU
+    Float P22(const float slope_x, const float slope_y) const {
+        const float tmp = 1.0f + slope_x * slope_x / (alpha_x * alpha_x) +
+                          slope_y * slope_y / (alpha_y * alpha_y);
+        const float value = 1.0f / (Pi * alpha_x * alpha_y) / (tmp * tmp);
+        return value;
+    }
+
+    PBRT_CPU_GPU
+    Float alpha_i(Vector3f wi) const {
+        const Float invSinTheta2 = 1.0f / (1.0f - wi.z * wi.z);
+        const Float cosPhi2 = wi.x * wi.x * invSinTheta2;
+        const Float sinPhi2 = wi.y * wi.y * invSinTheta2;
+        const Float alpha_i =
+            sqrtf(cosPhi2 * alpha_x * alpha_x + sinPhi2 * alpha_y * alpha_y);
+        return alpha_i;
+    }
+
+    PBRT_CPU_GPU
     Float Lambda(Vector3f w) const {
-        Float tan2Theta = Tan2Theta(w);
-        if (IsInf(tan2Theta))
-            return 0;
-        Float alpha2 = Sqr(CosPhi(w) * alpha_x) + Sqr(SinPhi(w) * alpha_y);
-        return (std::sqrt(1 + alpha2 * tan2Theta) - 1) / 2;
+        if (w.z > 0.9999f)
+            return 0.0f;
+        if (w.z < -0.9999f)
+            return -1.0f;
+        // a
+        const float theta_i = acosf(w.z);
+        const float a = 1.0f / tanf(theta_i) / alpha_i(w);
+        // value
+        const float value = 0.5f * (-1.0f + copysignf(1.f, a) * sqrtf(1 + 1 / (a * a)));
+        return value;
     }
 
     PBRT_CPU_GPU
@@ -159,7 +182,16 @@ class TrowbridgeReitzDistribution {
 
     PBRT_CPU_GPU
     Float D(Vector3f w, Vector3f wm) const {
-        return G1(w) / AbsCosTheta(w) * D(wm) * AbsDot(w, wm);
+        if (wm.z <= 0.0f)
+            return 0.0f;
+        // normalization coefficient
+        const float projectedarea = projectedArea(w);
+        if (projectedarea < FLT_EPSILON)
+            return 0;
+        const float c = 1.0f / projectedarea;
+        // value
+        const float value = c * std::max(0.0f, Dot(w, wm)) * D(wm);
+        return value;
     }
 
     PBRT_CPU_GPU
@@ -167,33 +199,95 @@ class TrowbridgeReitzDistribution {
 
     PBRT_CPU_GPU
     Vector3f Sample_wm(Vector3f w, Point2f u) const {
-        // Transform _w_ to hemispherical configuration
-        Vector3f wh = Normalize(Vector3f(alpha_x * w.x, alpha_y * w.y, w.z));
-        if (wh.z < 0)
-            wh = -wh;
+        // stretch to match configuration with alpha=1.0
+        const Vector3f wi_11 = Normalize(Vector3f(alpha_x * w.x, alpha_y * w.y, w.z));
 
-        // Find orthonormal basis for visible normal sampling
-        Vector3f T1 = (wh.z < 0.99999f) ? Normalize(Cross(Vector3f(0, 0, 1), wh))
-                                        : Vector3f(1, 0, 0);
-        Vector3f T2 = Cross(wh, T1);
+        // sample visible slope with alpha=1.0
+        Vector2f slope_11 = sampleP22_11(acosf(wi_11.z), u.x, u.y);
 
-        // Generate uniformly distributed points on the unit disk
-        Point2f p = SampleUniformDiskPolar(u);
+        // align with view direction
+        const float phi = atan2(wi_11.y, wi_11.x);
+        Vector2f slope(cosf(phi) * slope_11.x - sinf(phi) * slope_11.y,
+                       sinf(phi) * slope_11.x + cos(phi) * slope_11.y);
 
-        // Warp hemispherical projection for visible normal sampling
-        Float h = std::sqrt(1 - Sqr(p.x));
-        p.y = Lerp((1 + wh.z) / 2, h, p.y);
+        // stretch back
+        slope.x *= alpha_x;
+        slope.y *= alpha_y;
 
-        // Reproject to hemisphere and transform normal to ellipsoid configuration
-        Float pz = std::sqrt(std::max<Float>(0, 1 - LengthSquared(Vector2f(p))));
-        Vector3f nh = p.x * T1 + p.y * T2 + pz * wh;
-        CHECK_RARE(1e-5f, nh.z == 0);
-        return Normalize(
-            Vector3f(alpha_x * nh.x, alpha_y * nh.y, std::max<Float>(1e-6f, nh.z)));
+        // if numerical instability
+        if ((slope.x != slope.x) || !IsFinite(slope.x)) {
+            if (w.z > 0)
+                return Vector3f(0.0f, 0.0f, 1.0f);
+            else
+                return Normalize(Vector3f(w.x, w.y, 0.0f));
+        }
+
+        // compute normal
+        const Vector3f wm = Normalize(Vector3f(-slope.x, -slope.y, 1.0f));
+        return wm;
     }
 
     PBRT_CPU_GPU
-    Float projectedArea(Vector3f wi) const { return (1.f + Lambda(wi)) * CosTheta(wi); }
+    Vector2f sampleP22_11(const float theta_i, const float U, const float U_2) const {
+        Vector2f slope;
+        if (theta_i < 0.0001f) {
+            const float r = sqrtf(U / (1.0f - U));
+            const float phi = 6.28318530718f * U_2;
+            slope.x = r * cosf(phi);
+            slope.y = r * sinf(phi);
+            return slope;
+        }
+        // constant
+        const float sin_theta_i = sinf(theta_i);
+        const float cos_theta_i = cosf(theta_i);
+        const float tan_theta_i = sin_theta_i / cos_theta_i;
+        // slope associated to theta_i
+        const float slope_i = cos_theta_i / sin_theta_i;
+        // projected area
+        const float projectedarea = 0.5f * (cos_theta_i + 1.0f);
+        if (projectedarea < 0.0001f || projectedarea != projectedarea)
+            return Vector2f(0.f, 0.f);
+        // normalization coefficient
+        const float c = 1.0f / projectedarea;
+        const float A = 2.0f * U / cos_theta_i / c - 1.0f;
+        const float B = tan_theta_i;
+        const float tmp = 1.0f / (A * A - 1.0f);
+        const float D = sqrtf(std::max(0.0f, B * B * tmp * tmp - (A * A - B * B) * tmp));
+        const float slope_x_1 = B * tmp - D;
+        const float slope_x_2 = B * tmp + D;
+        slope.x = (A < 0.0f || slope_x_2 > 1.0f / tan_theta_i) ? slope_x_1 : slope_x_2;
+        float U2;
+        float S;
+        if (U_2 > 0.5f) {
+            S = 1.0f;
+            U2 = 2.0f * (U_2 - 0.5f);
+        } else {
+            S = -1.0f;
+            U2 = 2.0f * (0.5f - U_2);
+        }
+        const float z =
+            (U2 * (U2 * (U2 * 0.27385f - 0.73369f) + 0.46341f)) /
+            (U2 * (U2 * (U2 * 0.093073f + 0.309420f) - 1.000000f) + 0.597999f);
+        slope.y = S * z * sqrtf(1.0f + slope.x * slope.x);
+        return slope;
+    }
+
+    PBRT_CPU_GPU
+    Float projectedArea(Vector3f wi) const {
+        if (wi.z > 0.9999f)
+            return 1.0f;
+        if (wi.z < -0.9999f)
+            return 0.0f;
+        // a
+        const float theta_i = acosf(wi.z);
+        const float sin_theta_i = sinf(theta_i);
+        const float alphai = alpha_i(wi);
+        // value
+        const float value =
+            0.5f *
+            (wi.z + sqrtf(wi.z * wi.z + sin_theta_i * sin_theta_i * alphai * alphai));
+        return value;
+    }
 
     std::string ToString() const;
 

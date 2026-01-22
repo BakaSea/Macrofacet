@@ -1,16 +1,15 @@
 Sampler "halton"
-  "integer pixelsamples" 16
-LookAt 1 0.8 1.7
-       0.15 0 0
+  "integer pixelsamples" 6
+LookAt 1 0.8 3
+       0 -0.1 -0.2
        0 1 0
 
 Camera "perspective"
-    "float fov" 60
+    "float fov" 26.2
 
 Film "rgb"
-  "integer xresolution" 640
-  "integer yresolution" 640
-  "float cropwindow" [0 1 0.21875 0.78125]
+  "integer xresolution" 1920
+  "integer yresolution" 1080
   "string filename" "dragon.exr"
 
 Integrator "volpath"
@@ -20,29 +19,41 @@ WorldBegin
 
 #LightSource "infinite" "rgb L" [ 1 1 1 ]
 AttributeBegin
-  Rotate 180 0 0 1
-  Rotate 90 1 0 0
-  Rotate 90 0 0 1
+  Rotate -67.2614 0 1 0
+  Rotate -90 1 0 0
   LightSource "infinite" "string filename" "FlowCheck.exr"
 AttributeEnd
 
 AttributeBegin
   Translate 0 -0.6 0
-  Scale 10000 10000 10000
-  Material "diffuse" "rgb reflectance" [ 0.15 0.15 0.15 ]
+  Scale 50 50 50
+  Material "diffuse" "rgb reflectance" [ 0.2 0.2 0.2 ]
   Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
     "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
 AttributeEnd
 
 AttributeBegin
-  MakeNamedMedium "macrofacet" "string type" "macrofacetvdb" 
-    "string filename" "dragon-0005-005-01-1.nvdb"
-    "rgb albedo" [ 0.7 0.7 0.7 ]
+  Translate 0 5 0
+  Scale 0.5 0.5 0.5
+  AreaLightSource "diffuse" "rgb L" [200 200 200] "float scale" 0.31830988618379067154
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
+
+AttributeBegin
+  AttributeBegin
+    Rotate 180 0 1 0
+    Scale 0.01 0.01 0.01
+    MakeNamedMedium "macrofacet" "string type" "macrofacetvdb" 
+      "string filename" "dragon.nvdb"
+      "string ndf" "gp"
+      "rgb albedo" [ 0.9 0.56 0.43 ]
+  AttributeEnd
   AttributeBegin
     Material "interface"
     MediumInterface "macrofacet" ""
     #Material "conductor" "rgb reflectance" [1.0 1.0 1.0] "float roughness" 0.25
-    Scale 2 0.5 1
+    Scale 2 0.55 1
     Shape "plymesh" "string filename" "cube.ply"
     #Shape "plymesh" "string filename" "dragon.ply"
   AttributeEnd

@@ -1127,6 +1127,7 @@ MediumProperties MacrofacetVDBMedium::SamplePoint(
         normal = Normal3f(0.f, 0.f, 1.f);
     }
     normal = renderFromMedium(normal);
+    normal = Normalize(normal);
     Frame frame = Frame::FromZ(normal);
 
     NormalDistribution ndf(ndfType, alpha, alpha, alpha);

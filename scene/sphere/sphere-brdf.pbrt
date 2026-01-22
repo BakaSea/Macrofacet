@@ -1,5 +1,5 @@
 Sampler "halton"
-  "integer pixelsamples" 16
+  "integer pixelsamples" 1024
 LookAt 3 0 0
        0 0 0
        0 0 1
@@ -23,15 +23,15 @@ AttributeEnd
 
 AttributeBegin
   MakeNamedMedium "macrofacet" "string type" "spheremacrofacet"
-    "string ndf" "beckmann" 
-    "float alpha" [ 0.1 ]
-    "float alphaz" [ 1 ]
-    "float sigma" [ 0.001 ]
+    "string ndf" "ggx" 
+    "float alpha" [ 0.8 ]
+    "float alphaz" [ 0.1 ]
+    "float sigma" [ 0.3 ]
   AttributeBegin
-    #Material "interface"
-    #MediumInterface "macrofacet" ""
+    Material "interface"
+    MediumInterface "macrofacet" ""
     #MediumInterface "homo" ""
-    Material "conductor" "string ndf" "beckmann" "bool remaproughness" false "float roughness" [ 0.1 ] "rgb reflectance" [1.0 1.0 1.0]
-    Shape "sphere" "float radius" [ 1.000 ]
+    #Material "conductor" "string ndf" "ggx" "bool remaproughness" false "float roughness" [ 0.2 ] "rgb reflectance" [1.0 1.0 1.0]
+    Shape "sphere" "float radius" [ 1.9 ]
   AttributeEnd
 AttributeEnd

@@ -1,5 +1,5 @@
 Sampler "halton"
-  "integer pixelsamples" 4096
+  "integer pixelsamples" 300
 LookAt -2 2.5 7
        0 -0.3 0
        0 1 0
