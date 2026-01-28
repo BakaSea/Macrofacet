@@ -77,9 +77,8 @@ SampledSpectrum SpecularPhaseFunction::p(Vector3f wo, Vector3f wi) const {
 
     // value
     const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
-    SampledSpectrum F =
-        albedo * Lerp(powf(1.f - Dot(wo, wh), 5.f), albedo, SampledSpectrum(1.f));
-    return SampledSpectrum(albedo * value);
+    SampledSpectrum F = Lerp(powf(1.f - Dot(wo, wh), 5.f), albedo, SampledSpectrum(1.f));
+    return SampledSpectrum(F * value);
 }
 
 PBRT_CPU_GPU
@@ -94,7 +93,9 @@ pstd::optional<PhaseFunctionSample> SpecularPhaseFunction::Sample_p(
 
     const Float value = 0.25f * distrib.D(localWo, wm) / Dot(localWo, wm);
 
-    SampledSpectrum phaseVal = albedo * value;
+    SampledSpectrum F =
+        Lerp(powf(1.f - Dot(localWo, wm), 5.f), albedo, SampledSpectrum(1.f));
+    SampledSpectrum phaseVal = F * value;
     if (distrib.type == GP) {
         pdf /= 4.f * Dot(localWo, wm);
         //Float pdf = 0.25f * InvPi;

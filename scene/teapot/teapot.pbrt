@@ -1,0 +1,48 @@
+Sampler "halton"
+  "integer pixelsamples" 512
+LookAt -3 0 0.4
+       0 0 0.4
+       0 0 1
+
+Camera "perspective"
+    "float fov" 25
+
+Film "rgb"
+  "integer xresolution" 640
+  "integer yresolution" 360
+  "string filename" "teapot.exr"
+
+Integrator "volpath"
+
+WorldBegin
+
+AttributeBegin
+Rotate 180 0 0 1
+LightSource "infinite" "string filename" "envmap.exr"
+AttributeEnd
+
+AttributeBegin
+  Translate 3 0 0
+  Rotate 90 0 0 1
+  Scale 100 100 100
+  Material "diffuse" "rgb reflectance" [ 0.1 0.1 0.1 ]
+  Shape "trianglemesh"  "integer indices" [0 2 1 0 3 2 ]
+    "point3 P" [1 0 -1    -1 0 -1    -1 0 1    1 0 1 ]
+AttributeEnd
+
+AttributeBegin
+  AttributeBegin
+    MakeNamedMedium "macrofacet" "string type" "macrofacetvdb" 
+      "string filename" "teapot.nvdb"
+      "string ndf" "gp"
+      "rgb albedo" [ 1 1 1 ]
+  AttributeEnd
+  AttributeBegin
+    Material "interface"
+    MediumInterface "macrofacet" ""
+    #Material "conductor" "rgb reflectance" [1.0 1.0 1.0] "float roughness" 1
+    Scale 1 1 1
+    Shape "plymesh" "string filename" "cube.ply"
+    #Shape "plymesh" "string filename" "teapot.ply"
+  AttributeEnd
+AttributeEnd
