@@ -45,7 +45,6 @@ class PhaseFunction
 };
 
 class SphereMacrofacet;
-class KnobMacrofacet;
 class HomogeneousMedium;
 class GridMedium;
 class RGBGridMedium;
@@ -89,7 +88,7 @@ struct MediumSample {
 // Medium Definition
 class Medium
     : public TaggedPointer<  // Medium Types
-                   SphereMacrofacet, KnobMacrofacet, HomogeneousMedium, GridMedium,
+                   SphereMacrofacet, HomogeneousMedium, GridMedium,
                    RGBGridMedium, CloudMedium, NanoVDBMedium, MacrofacetVDBMedium
 
           > {

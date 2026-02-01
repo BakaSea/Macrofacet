@@ -9,6 +9,7 @@ flat Light;
 flat Material;
 flat Medium;
 flat int;
+flat SpecularPhaseFunction;
 
 soa BSDF;
 soa LightSampleContext;
@@ -151,6 +152,7 @@ soa MediumScatterWorkItem<ConcretePhaseFunction> {
     Float etaScale;
     Medium medium;
     int pixelIndex;
+    SpecularPhaseFunction specularPhase;
 };
 
 soa MaterialEvalWorkItem<ConcreteMaterial> {

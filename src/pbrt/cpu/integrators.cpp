@@ -1302,6 +1302,10 @@ SampledSpectrum VolPathIntegrator::Li(RayDifferential ray, SampledWavelengths &l
                         beta *= T_maj * mp.sigma_s / pdf;
                         r_u *= T_maj * mp.sigma_s / pdf;
 
+                        if (!mp.phase) {
+                            mp.phase = &mp.specularPhase;
+                        }
+
                         if (beta && r_u) {
                             // Sample direct lighting at volume-scattering event
                             MediumInteraction intr(p, -ray.d, ray.time, ray.medium,

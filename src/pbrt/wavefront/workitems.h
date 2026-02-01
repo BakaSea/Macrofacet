@@ -259,6 +259,7 @@ struct MediumScatterWorkItem {
     Float etaScale;
     Medium medium;
     int pixelIndex;
+    SpecularPhaseFunction specularPhase;
 };
 
 // MaterialEvalWorkItem Definition

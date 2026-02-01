@@ -629,6 +629,7 @@ class GPDistribution {
 class NormalDistribution {
   public:
     NormalDistribution() = default;
+    PBRT_CPU_GPU
     NormalDistribution(NormalDistributionType type, Float ax, Float ay, Float az = 1e-4f) : type(type) {
         switch (type) {
         case pbrt::GGX:

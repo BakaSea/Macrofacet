@@ -77,13 +77,62 @@ class SpecularPhaseFunction {
         : albedo(albedo), distrib(distrib), frame(frame) {}
 
     PBRT_CPU_GPU
-    SampledSpectrum p(Vector3f wo, Vector3f wi) const;
+    SampledSpectrum p(Vector3f wo, Vector3f wi) const {
+        wo = frame.ToLocal(wo);
+        wi = frame.ToLocal(wi);
+        // half vector
+        const Vector3f wh = Normalize(wi + wo);
+
+        // value
+        const Float cosTheta = Dot(wo, wh);
+        const Float value = 0.25f * distrib.D(wo, wh) / cosTheta;
+
+        Float k = 1 - cosTheta;
+        Float k2 = k * k;
+        Float k5 = k2 * k2 * k;
+        SampledSpectrum F = Lerp(k5, albedo, SampledSpectrum(1.f));
+        return F * value;
+        //return albedo * value;
+    }
 
     PBRT_CPU_GPU
-    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const;
+    pstd::optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u) const {
+        Vector3f localWo = frame.ToLocal(wo);
+        auto [wm, pdf] = distrib.Sample_wm(localWo, u);
+
+        // reflectW
+        Vector3f localWi = Reflect(localWo, wm);
+        Vector3f wi = frame.FromLocal(localWi);
+
+        const Float cosTheta = Dot(localWo, wm);
+        const Float value = 0.25f * distrib.D(localWo, wm) / cosTheta;
+
+        Float k = 1 - cosTheta;
+        Float k2 = k * k;
+        Float k5 = k2 * k2 * k;
+        SampledSpectrum F = Lerp(k5, albedo, SampledSpectrum(1.f));
+        SampledSpectrum phaseVal = F * value;
+        //SampledSpectrum phaseVal = albedo * value;
+        if (distrib.type == GP) {
+            pdf /= 4.f * Dot(localWo, wm);
+            return PhaseFunctionSample{phaseVal, wi, pdf};
+        } else {
+            pdf = PDF(wo, wi);
+            return PhaseFunctionSample{phaseVal, wi, pdf};
+        }
+    }
 
     PBRT_CPU_GPU
-    Float PDF(Vector3f wo, Vector3f wi) const;
+    Float PDF(Vector3f wo, Vector3f wi) const {
+        wo = frame.ToLocal(wo);
+        wi = frame.ToLocal(wi);
+        // half vector
+        const Vector3f wh = Normalize(wi + wo);
+
+        // value
+        const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
+        return value;
+    }
 
     static const char *Name() { return "Specular"; }
 
@@ -100,6 +149,7 @@ struct MediumProperties {
     SampledSpectrum sigma_a, sigma_s;
     PhaseFunction phase;
     SampledSpectrum Le;
+    SpecularPhaseFunction specularPhase;
 };
 
 // HomogeneousMajorantIterator Definition
@@ -243,11 +293,10 @@ class SphereMacrofacet {
   public:
     using MajorantIterator = HomogeneousMajorantIterator;
 
-    SphereMacrofacet(const Transform &renderFromMedium, Spectrum albedo, Float k,
+    SphereMacrofacet(const Transform &renderFromMedium, Spectrum albedo,
                      Float sigma, Float radius, NormalDistribution ndf, Allocator alloc)
         : renderFromMedium(renderFromMedium),
           albedo_spec(albedo, alloc),
-          k(k),
           sigma(sigma),
           radius(radius),
           ndf(ndf),
@@ -261,83 +310,49 @@ class SphereMacrofacet {
     bool IsEmissive() const { return false; }
 
     PBRT_CPU_GPU
-    Float Density(Point3f p) const;
+    Float Density(Point3f p) const {
+        Float d = Length(p - Point3f(0.f, 0.f, 0.f)) - radius;
+        if (d <= -3.f * sigma) {
+            d = -3.f * sigma;
+        }
+        Float pdf = Gaussian(d, 0.f, sigma);
+        Float cdf = 0.5f * (1.f + erf(d / (sigma * std::sqrt(2.f))));
+        return pdf / cdf;
+    }
 
     PBRT_CPU_GPU
     MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
-        Error("SamplePoint No implement!");
+        LOG_FATAL("SamplePoint No implement!");
         return MediumProperties{};
     }
 
     PBRT_CPU_GPU
     MediumProperties SamplePoint(Point3f p, Vector3f wo,
-                                 const SampledWavelengths &lambda) const;
+                                 const SampledWavelengths &lambda) const {
+        p = renderFromMedium.ApplyInverse(p);
+        wo = renderFromMedium.ApplyInverse(wo);
+        Float rou = Density(p);
+        Normal3f n = Normal(p);
+        Frame frame = Frame::FromZ(n);
+        Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
+        SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
+        SampledSpectrum albedo = albedo_spec.Sample(lambda);
+        SampledSpectrum sigma_s = sigma_t;
+        SampledSpectrum sigma_a(0.f);
+
+        SpecularPhaseFunction phase(albedo, ndf, frame);
+        return MediumProperties{sigma_a, sigma_s, nullptr, SampledSpectrum(0.f), phase};
+    }
 
     PBRT_CPU_GPU
     HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
-                                          const SampledWavelengths &lambda) const;
-
-    PBRT_CPU_GPU
-    MediumSample SampleDistance(Ray ray, Float tMax, Float u,
-                                const SampledWavelengths &lambda) const {
-        return MediumSample();
+                                          const SampledWavelengths &lambda) const {
+        ray = renderFromMedium.ApplyInverse(ray);
+        Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
+        Float projectedArea = ndf.projectedArea(Vector3f(0.f, 0.f, 1.f));
+        SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
+        return HomogeneousMajorantIterator(0, tMax, sigma_maj);
     }
-
-    PBRT_CPU_GPU
-    SampledSpectrum EvalTransmittance(Point3f x, Point3f y,
-                                      const SampledWavelengths &lambda) const {
-        return SampledSpectrum(0.f);
-    }
-
-    std::string ToString() const;
-
-  private:
-
-    PBRT_CPU_GPU
-    Normal3f Normal(Point3f p) const;
-
-    Transform renderFromMedium;
-    DenselySampledSpectrum albedo_spec;
-    NormalDistribution ndf;
-    Float k, sigma, radius;
-    Allocator alloc;
-};
-
-class KnobMacrofacet {
-  public:
-    using MajorantIterator = HomogeneousMajorantIterator;
-
-    KnobMacrofacet(const Transform &renderFromMedium, Spectrum albedo, Float sigma,
-                   NormalDistribution ndf, Allocator alloc)
-        : renderFromMedium(renderFromMedium),
-          albedo_spec(albedo, alloc),
-          sigma(sigma),
-          ndf(ndf),
-          alloc(alloc) {}
-
-    static KnobMacrofacet *Create(const ParameterDictionary &parameters,
-                                  const Transform &renderFromMedium, const FileLoc *loc,
-                                  Allocator alloc);
-
-    PBRT_CPU_GPU
-    bool IsEmissive() const { return false; }
-
-    PBRT_CPU_GPU
-    Float Density(Point3f p) const;
-
-    PBRT_CPU_GPU
-    MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
-        Error("SamplePoint No implement!");
-        return MediumProperties{};
-    }
-
-    PBRT_CPU_GPU
-    MediumProperties SamplePoint(Point3f p, Vector3f wo,
-                                 const SampledWavelengths &lambda) const;
-
-    PBRT_CPU_GPU
-    HomogeneousMajorantIterator SampleRay(Ray ray, Float tMax,
-                                          const SampledWavelengths &lambda) const;
 
     PBRT_CPU_GPU
     MediumSample SampleDistance(Ray ray, Float tMax, Float u,
@@ -355,12 +370,18 @@ class KnobMacrofacet {
 
   private:
     PBRT_CPU_GPU
-    Normal3f Normal(Point3f p) const;
+    Normal3f Normal(Point3f p) const {
+        Float dfdx = 2.f * p.x;
+        Float dfdy = 2.f * p.y;
+        Float dfdz = 2.f * p.z;
+        Normal3f n(dfdx, dfdy, dfdz);
+        return Normalize(n);
+    }
 
     Transform renderFromMedium;
     DenselySampledSpectrum albedo_spec;
     NormalDistribution ndf;
-    Float sigma;
+    Float sigma, radius;
     Allocator alloc;
 };
 
@@ -935,17 +956,60 @@ class MacrofacetVDBMedium {
 
     PBRT_CPU_GPU
     MediumProperties SamplePoint(Point3f p, const SampledWavelengths &lambda) const {
-        Error("SamplePoint No implement!");
+        LOG_FATAL("SamplePoint No implement!");
         return MediumProperties{};
     }
 
     PBRT_CPU_GPU
     MediumProperties SamplePoint(Point3f p, Vector3f wo,
-                                 const SampledWavelengths &lambda) const;
+                                 const SampledWavelengths &lambda) const {
+        p = renderFromMedium.ApplyInverse(p);
+
+        nanovdb::Vec3<float> pIndex =
+            densityFloatGrid->worldToIndexF(nanovdb::Vec3<float>(p.x, p.y, p.z));
+        using Sampler = nanovdb::SampleFromVoxels<nanovdb::FloatGrid::TreeType, 1, false>;
+        Float rou = Sampler(densityFloatGrid->tree())(pIndex);
+        Float alpha = Sampler(alphaFloatGrid->tree())(pIndex);
+        nanovdb::Vec3<float> sdfGradient = Sampler(sdfFloatGrid->tree()).gradient(pIndex);
+
+        Normal3f normal(sdfGradient[0], sdfGradient[1], sdfGradient[2]);
+        if (rou > 0) {
+            normal = Normalize(normal);
+        } else {
+            normal = Normal3f(0.f, 0.f, 1.f);
+        }
+        normal = renderFromMedium(normal);
+        normal = Normalize(normal);
+        Frame frame = Frame::FromZ(normal);
+
+        NormalDistribution ndf(ndfType, alpha, alpha, alpha);
+
+        Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
+        SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
+
+        SampledSpectrum albedo = albedo_spec.Sample(lambda);
+        SampledSpectrum sigma_s = sigma_t;
+        SampledSpectrum sigma_a(0.f);
+
+        SpecularPhaseFunction phase(albedo, ndf, frame);
+
+        return MediumProperties{sigma_a, sigma_s, nullptr, SampledSpectrum(0.f), phase};
+    }
 
     PBRT_CPU_GPU
     DDAMajorantIterator SampleRay(Ray ray, Float raytMax,
-                                  const SampledWavelengths &lambda) const;
+                                  const SampledWavelengths &lambda) const {
+        // Transform ray to medium's space and compute bounds overlap
+        ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+        Float tMin, tMax;
+        if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
+            return {};
+        DCHECK_LE(tMax, raytMax);
+
+        SampledSpectrum sigma_t = SampledSpectrum(1.2f);
+
+        return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
+    }
 
     PBRT_CPU_GPU
     MediumSample SampleDistance(Ray ray, Float tMax, Float u,
@@ -1051,6 +1115,11 @@ PBRT_CPU_GPU SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, RNG &rng,
     tMax *= Length(ray.d);
     ray.d = Normalize(ray.d);
 
+    // Fix GPU precision error
+    if (IsInf(tMax)) {
+        return SampledSpectrum(1.f);
+    }
+
     // Initialize _MajorantIterator_ for ray majorant sampling
     ConcreteMedium *medium = ray.medium.Cast<ConcreteMedium>();
     typename ConcreteMedium::MajorantIterator iter = medium->SampleRay(ray, tMax, lambda);
@@ -1092,10 +1161,8 @@ PBRT_CPU_GPU SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, RNG &rng,
                     // Returning out of doubly-nested while loop is not as good perf. wise
                     // on the GPU vs using "done" here.
                     done = true;
-                    delete mp.phase.Cast<SpecularPhaseFunction>();
                     break;
                 }
-                delete mp.phase.Cast<SpecularPhaseFunction>();
                 T_maj = SampledSpectrum(1.f);
                 tMin = t;
 

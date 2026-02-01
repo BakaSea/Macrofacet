@@ -105,13 +105,16 @@ void WavefrontPathIntegrator::SampleMediumInteraction(int wavefrontDepth) {
                         beta *= T_maj * mp.sigma_s / pr;
                         r_u *= T_maj * mp.sigma_s / pr;
 
+                        if (!mp.phase)
+                            mp.phase = &mp.specularPhase;
+
                         // Enqueue medium scattering work.
                         auto enqueue = [=](auto ptr) {
                             using PhaseFunction = typename std::remove_const_t<
                                 std::remove_reference_t<decltype(*ptr)>>;
                             mediumScatterQueue->Push(MediumScatterWorkItem<PhaseFunction>{
                                 p, w.depth, lambda, beta, r_u, ptr, -ray.d, ray.time,
-                                w.etaScale, ray.medium, w.pixelIndex});
+                                w.etaScale, ray.medium, w.pixelIndex, mp.specularPhase});
                         };
                         DCHECK_RARE(1e-6f, !beta);
                         if (beta && r_u)
@@ -270,6 +273,10 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
         PBRT_CPU_GPU_LAMBDA(const MediumScatterWorkItem<ConcretePhaseFunction> w) {
             RaySamples raySamples = pixelSampleState.samples[w.pixelIndex];
             Vector3f wo = w.wo;
+            auto phase = w.phase;
+
+            if constexpr (std::is_same_v<ConcretePhaseFunction, SpecularPhaseFunction>)
+                phase = &w.specularPhase;
 
             // Sample direct lighting at medium scattering event.  First,
             // choose a light source.
@@ -284,15 +291,14 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
                     light.SampleLi(ctx, raySamples.direct.u, w.lambda, true);
                 if (ls && ls->L && ls->pdf > 0) {
                     Vector3f wi = ls->wi;
-                    SampledSpectrum beta = w.beta * w.phase->p(wo, wi);
-
+                    SampledSpectrum beta = w.beta * phase->p(wo, wi);
                     PBRT_DBG("Phase phase beta %f %f %f %f\n", beta[0], beta[1], beta[2],
                              beta[3]);
 
                     // Compute PDFs for direct lighting MIS calculation.
                     Float lightPDF = ls->pdf * sampledLight->p;
                     Float phasePDF =
-                        IsDeltaLight(light.Type()) ? 0.f : w.phase->PDF(wo, wi);
+                        IsDeltaLight(light.Type()) ? 0.f : phase->PDF(wo, wi);
                     SampledSpectrum r_u = w.r_u * phasePDF;
                     SampledSpectrum r_l = w.r_u * lightPDF;
 
@@ -315,7 +321,7 @@ void WavefrontPathIntegrator::SampleMediumScattering(int wavefrontDepth) {
 
             // Sample indirect lighting.
             pstd::optional<PhaseFunctionSample> phaseSample =
-                w.phase->Sample_p(wo, raySamples.indirect.u);
+                phase->Sample_p(wo, raySamples.indirect.u);
             if (!phaseSample || phaseSample->pdf == 0)
                 return;
 

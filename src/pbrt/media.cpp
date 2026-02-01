@@ -66,60 +66,6 @@ std::string DDAMajorantIterator::ToString() const {
                         voxel[0], voxel[1], voxel[2], grid);
 }
 
-PBRT_CPU_GPU
-SampledSpectrum SpecularPhaseFunction::p(Vector3f wo, Vector3f wi) const {
-    wo = frame.ToLocal(wo);
-    wi = frame.ToLocal(wi);
-    // half vector
-    const Vector3f wh = Normalize(wi + wo);
-    //if (wh.z < 0.0f)
-    //    return 0.0f;
-
-    // value
-    const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
-    SampledSpectrum F = Lerp(powf(1.f - Dot(wo, wh), 5.f), albedo, SampledSpectrum(1.f));
-    return SampledSpectrum(F * value);
-}
-
-PBRT_CPU_GPU
-pstd::optional<PhaseFunctionSample> SpecularPhaseFunction::Sample_p(
-    Vector3f wo, Point2f u) const {
-    Vector3f localWo = frame.ToLocal(wo);
-    auto [wm, pdf] = distrib.Sample_wm(localWo, u);
-
-    // reflectW
-    Vector3f localWi = Reflect(localWo, wm);
-    Vector3f wi = frame.FromLocal(localWi);
-
-    const Float value = 0.25f * distrib.D(localWo, wm) / Dot(localWo, wm);
-
-    SampledSpectrum F =
-        Lerp(powf(1.f - Dot(localWo, wm), 5.f), albedo, SampledSpectrum(1.f));
-    SampledSpectrum phaseVal = F * value;
-    if (distrib.type == GP) {
-        pdf /= 4.f * Dot(localWo, wm);
-        //Float pdf = 0.25f * InvPi;
-        return PhaseFunctionSample{phaseVal, wi, pdf};
-    } else {
-        pdf = PDF(wo, wi);
-        return PhaseFunctionSample{phaseVal, wi, pdf};
-    }
-}
-
-PBRT_CPU_GPU
-Float SpecularPhaseFunction::PDF(Vector3f wo, Vector3f wi) const {
-    wo = frame.ToLocal(wo);
-    wi = frame.ToLocal(wi);
-    // half vector
-    const Vector3f wh = Normalize(wi + wo);
-    // if (wh.z < 0.0f)
-    //     return 0.0f;
-
-    // value
-    const Float value = 0.25f * distrib.D(wo, wh) / Dot(wo, wh);
-    return value;
-}
-
 std::string SpecularPhaseFunction::ToString() const {
     return StringPrintf("[ SpecularPhaseFunction ]");
 }
@@ -231,7 +177,6 @@ SphereMacrofacet *SphereMacrofacet::Create(const ParameterDictionary &parameters
         if (!albedo)
             albedo = alloc.new_object<ConstantSpectrum>(1.f);
     }
-    Float k = parameters.GetOneFloat("k", 1.f);
     Float alpha = parameters.GetOneFloat("alpha", 1.f);
     Float alpha_z = parameters.GetOneFloat("alphaz", 1e-4f);
     Float sigma = parameters.GetOneFloat("sigma", 1.f / 3.f);
@@ -247,240 +192,12 @@ SphereMacrofacet *SphereMacrofacet::Create(const ParameterDictionary &parameters
     }
 
     NormalDistribution ndf(ndfType, alpha, alpha, alpha_z);
-    return alloc.new_object<SphereMacrofacet>(renderFromMedium, albedo, k, sigma, radius,
+    return alloc.new_object<SphereMacrofacet>(renderFromMedium, albedo, sigma, radius,
                                               ndf, alloc);
-}
-
-PBRT_CPU_GPU
-Float SphereMacrofacet::Density(Point3f p) const {
-    Float d = Length(p - Point3f(0.f, 0.f, 0.f)) - radius;
-    if (d <= -3.f * sigma) {
-        d = -3.f * sigma;
-    }
-    Float pdf = Gaussian(d, 0.f, sigma);
-    Float cdf = 0.5f * (1.f + erf(d / (sigma * std::sqrt(2.f))));
-    return k * pdf / cdf;
-}
-
-PBRT_CPU_GPU MediumProperties SphereMacrofacet::SamplePoint(
-    Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
-    p = renderFromMedium.ApplyInverse(p);
-    wo = renderFromMedium.ApplyInverse(wo);
-    Float rou = Density(p);
-    //Float rou = 1.f;
-    //Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
-    //if (maxRou < rou) {
-    //    rou = maxRou;
-    //}
-    Normal3f n = Normal(p);
-    Frame frame = Frame::FromZ(n);
-    Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
-    //Float projectedArea = 1.f;
-    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
-    SampledSpectrum albedo = albedo_spec.Sample(lambda);
-    //SampledSpectrum sigma_s = albedo * sigma_t;
-    //SampledSpectrum sigma_a = sigma_t - sigma_s;
-    SampledSpectrum sigma_s = sigma_t;
-    SampledSpectrum sigma_a(0.f);
-
-    SpecularPhaseFunction *phase = new SpecularPhaseFunction(albedo, ndf, frame);
-    return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
-}
-
-PBRT_CPU_GPU HomogeneousMajorantIterator
-SphereMacrofacet::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
-    ray = renderFromMedium.ApplyInverse(ray);
-    Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
-    //Float maxRou = 1.f;
-    Float projectedArea = ndf.projectedArea(Vector3f(0.f, 0.f, 1.f));
-    //Float projectedArea = 1;
-    SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
-    return HomogeneousMajorantIterator(0, tMax, sigma_maj);
 }
 
 std::string SphereMacrofacet::ToString() const {
     return StringPrintf("[ Sphere macrofacet ]");
-}
-
-PBRT_CPU_GPU
-Normal3f SphereMacrofacet::Normal(Point3f p) const {
-    Float dfdx = 2.f * p.x;
-    Float dfdy = 2.f * p.y;
-    Float dfdz = 2.f * p.z;
-    Normal3f n(dfdx, dfdy, dfdz);
-    return Normalize(n);
-}
-
-KnobMacrofacet *KnobMacrofacet::Create(const ParameterDictionary &parameters,
-                                           const Transform &renderFromMedium,
-                                           const FileLoc *loc, Allocator alloc) {
-    Spectrum albedo = nullptr;
-    if (!albedo) {
-        albedo =
-            parameters.GetOneSpectrum("albedo", nullptr, SpectrumType::Albedo, alloc);
-        if (!albedo)
-            albedo = alloc.new_object<ConstantSpectrum>(1.f);
-    }
-    Float alpha = parameters.GetOneFloat("alpha", 1.f);
-    Float alpha_z = parameters.GetOneFloat("alphaz", 1e-4f);
-    Float sigma = parameters.GetOneFloat("sigma", 1.f / 3.f);
-    std::string ndfTypeStr = parameters.GetOneString("ndf", "ggx");
-    NormalDistributionType ndfType;
-    if (ndfTypeStr == "ggx") {
-        ndfType = GGX;
-    } else if (ndfTypeStr == "beckmann") {
-        ndfType = Beckmann;
-    } else if (ndfTypeStr == "gp") {
-        ndfType = GP;
-    }
-
-    NormalDistribution ndf(ndfType, alpha, alpha, alpha_z);
-    return alloc.new_object<KnobMacrofacet>(renderFromMedium, albedo, sigma, ndf, alloc);
-}
-
-float sdSphere(Vector3f v, float r) {
-    return Length(v) - r;
-}
-
-float sdTorus(Vector3f p, Vector2f t) {
-    Vector2f q = Vector2f(Length(Vector2f(p.x, p.z)) - t.x, p.y);
-    return Length(q) - t.y;
-}
-
-float sdCone(Vector3f p, Vector2f c) {
-    // c is the sin/cos of the angle
-    float q = Length(Vector2f(p.x, p.y));
-    return Dot(c, Vector2f(q, p.z));
-}
-
-float sdCappedCylinder(Vector3f p, float h, float r) {
-    Vector2f d = Abs(Vector2f(Length(Vector2f(p.x, p.z)), p.y)) - Vector2f(h, r);
-    return std::min(std::max(d.x, d.y), 0.0f) +
-           Length(Vector2f(std::max(d.x, 0.f), std::max(d.y, 0.f)));
-}
-
-float sdTriPrism(Vector3f p, Vector2f h) {
-    Vector3f q = Abs(p);
-    return std::max(q.z - h.y, std::max(q.x * 0.866025f + p.y * 0.5f, -p.y) - h.x * 0.5f);
-}
-
-float opSmoothUnion(float d1, float d2, float k) {
-    float h = std::clamp(0.5f + 0.5f * (d2 - d1) / k, 0.0f, 1.0f);
-    return Lerp(h, d2, d1) - k * h * (1.0 - h);
-}
-float ssub(float d1, float d2, float k) {
-    float h = std::clamp(0.5 - 0.5 * (d2 + d1) / k, 0.0, 1.0);
-    return Lerp(h, d2, -d1) + k * h * (1.0 - h);
-}
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// actual distance functions
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-float sdBase(Vector3f p) {
-    // Intersect two cones
-    float base = opSmoothUnion(
-        sdCone(RotateX(-90.f)(p + Vector3f(0.f, .9f, 0.f)), Vector2f(Pi / 3., Pi / 3.)),
-        sdCone(RotateX(90.f)(p - Vector3f(0.f, .9f, 0.f)), Vector2f(Pi / 3.f, Pi / 3.f)),
-        0.02);
-    // Bound the base radius
-    base = std::max(base, sdCappedCylinder(p, 1.1f, 0.25f)) * 0.7f;
-    // Dig out the center
-    base = std::max(-sdCappedCylinder(p, 0.6f, 0.3f), base);
-    // Cut a slice of the pie
-    base = std::max(
-        -sdTriPrism(RotateX(90.f)(p + Vector3f(0.f, 0.f, -1.f)), Vector2f(1.2f, 0.3f)),
-        base);
-    return base;
-}
-
-float sdKnob(Vector3f p) {
-    float sphere = sdSphere(p, 1.0);
-    float cutout = sdSphere(p - Vector3f(0.0f, 0.5f, 0.5f), 0.7);
-    float cutout_etch =
-        sdTorus(RotateX(-45.f)(p - Vector3f(0.0f, 0.2f, 0.2f)), Vector2f(1.0f, 0.05f));
-    float innersphere = sdSphere(p - Vector3f(0.0f, 0.0f, 0.0f), 0.75);
-
-    // Cutout sphere
-    float d = ssub(cutout, sphere, 0.1);
-
-    // Add eye, etch the sphere
-    d = std::min(d, innersphere);
-    d = std::max(-cutout_etch, d);
-
-    // Add base
-    d = std::min(ssub(sphere, sdBase(p - Vector3f(0.f, -.775f, 0.f)), 0.1), d);
-    return d;
-}
-
-float knob(Vector3f p) {
-    const float scale = 0.8;
-    p *= 1. / scale;
-    return sdKnob(p) * scale;
-}
-
-PBRT_CPU_GPU
-Float KnobMacrofacet::Density(Point3f p) const {
-    Float d = knob(Vector3f(p.x, p.y, p.z));
-    if (d <= -3.f * sigma) {
-        d = -3.f * sigma;
-    }
-    Float pdf = Gaussian(d, 0.f, sigma);
-    Float cdf = 0.5f * (1.f + erf(d / (sigma * std::sqrt(2.f))));
-    return pdf / cdf;
-}
-
-PBRT_CPU_GPU MediumProperties KnobMacrofacet::SamplePoint(
-    Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
-    p = renderFromMedium.ApplyInverse(p);
-    wo = renderFromMedium.ApplyInverse(wo);
-    Float rou = Density(p);
-    // Float rou = 1.f;
-    // Float maxRou = Density(Point3f(0.f, 0.f, 0.f));
-    // if (maxRou < rou) {
-    //     rou = maxRou;
-    // }
-    Normal3f n = Normal(p);
-    Frame frame = Frame::FromZ(n);
-    Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
-    // Float projectedArea = 1.f;
-    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
-    SampledSpectrum albedo = albedo_spec.Sample(lambda);
-    // SampledSpectrum sigma_s = albedo * sigma_t;
-    // SampledSpectrum sigma_a = sigma_t - sigma_s;
-    SampledSpectrum sigma_s = sigma_t;
-    SampledSpectrum sigma_a(0.f);
-
-    SpecularPhaseFunction *phase = new SpecularPhaseFunction(albedo, ndf, frame);
-    return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
-}
-
-PBRT_CPU_GPU HomogeneousMajorantIterator
-KnobMacrofacet::SampleRay(Ray ray, Float tMax, const SampledWavelengths &lambda) const {
-    ray = renderFromMedium.ApplyInverse(ray);
-    Float maxRou = Gaussian(-3.f * sigma, 0.f, sigma) /
-                   (0.5f * (1.f + erf(-3.f * sigma / (sigma * std::sqrt(2.f)))));
-    // Float maxRou = 1.f;
-    Float projectedArea = ndf.projectedArea(Vector3f(0.f, 0.f, 1.f));
-    // Float projectedArea = 1;
-    SampledSpectrum sigma_maj = SampledSpectrum(maxRou * projectedArea);
-    return HomogeneousMajorantIterator(0, tMax, sigma_maj);
-}
-
-std::string KnobMacrofacet::ToString() const {
-    return StringPrintf("[ Knob macrofacet ]");
-}
-
-PBRT_CPU_GPU
-Normal3f KnobMacrofacet::Normal(Point3f p) const {
-    constexpr float eps = 0.001f;
-
-    Vector3f v(p.x, p.y, p.z);
-
-    float vals[4] = {knob(v + Vector3f(eps, 0.f, 0.f)), knob(v + Vector3f(0.f, eps, 0.f)),
-                     knob(v + Vector3f(0.f, 0.f, eps)), knob(v)};
-
-    return Normalize(Normal3f(vals[0] - vals[3], vals[1] - vals[3], vals[2] - vals[3]) / eps);
 }
 
 // HomogeneousMedium Method Definitions
@@ -1031,7 +748,7 @@ MacrofacetVDBMedium::MacrofacetVDBMedium(const Transform &renderFromMedium,
                                          nanovdb::GridHandle<NanoVDBBuffer> sg,
                                          Allocator alloc)
     : renderFromMedium(renderFromMedium),
-      albedo_spec(albedo),
+      albedo_spec(albedo, alloc),
       ndfType(ndfType),
       majorantGrid(Bounds3f(), {64, 64, 64}, alloc),
       densityGrid(std::move(dg)),
@@ -1108,59 +825,6 @@ MacrofacetVDBMedium::MacrofacetVDBMedium(const Transform &renderFromMedium,
     LOG_VERBOSE("Finished nanovdb grid GetMaxDensityGrid()");
 }
 
-PBRT_CPU_GPU
-MediumProperties MacrofacetVDBMedium::SamplePoint(
-    Point3f p, Vector3f wo, const SampledWavelengths &lambda) const {
-    p = renderFromMedium.ApplyInverse(p);
-    //wo = renderFromMedium.ApplyInverse(wo);
-
-    nanovdb::Vec3<float> pIndex =
-        densityFloatGrid->worldToIndexF(nanovdb::Vec3<float>(p.x, p.y, p.z));
-    using Sampler = nanovdb::SampleFromVoxels<nanovdb::FloatGrid::TreeType, 1, false>;
-    Float rou = Sampler(densityFloatGrid->tree())(pIndex);
-    Float alpha = Sampler(alphaFloatGrid->tree())(pIndex);
-    nanovdb::Vec3<float> sdfGradient = Sampler(sdfFloatGrid->tree()).gradient(pIndex);
-
-    Normal3f normal(sdfGradient[0], sdfGradient[1], sdfGradient[2]);
-    if (rou > 0) {
-        normal = Normalize(normal);
-    } else {
-        normal = Normal3f(0.f, 0.f, 1.f);
-    }
-    normal = renderFromMedium(normal);
-    normal = Normalize(normal);
-    Frame frame = Frame::FromZ(normal);
-
-    NormalDistribution ndf(ndfType, alpha, alpha, alpha);
-
-    Float projectedArea = ndf.projectedArea(frame.ToLocal(-wo));
-    SampledSpectrum sigma_t = SampledSpectrum(rou * projectedArea);
-    SampledSpectrum albedo = albedo_spec.Sample(lambda);
-    //SampledSpectrum sigma_s = albedo * sigma_t;
-    //SampledSpectrum sigma_a = sigma_t - sigma_s;
-    SampledSpectrum sigma_s = sigma_t;
-    SampledSpectrum sigma_a(0.f);
-
-    SpecularPhaseFunction *phase = new SpecularPhaseFunction(albedo, ndf, frame);
-
-    return MediumProperties{sigma_a, sigma_s, phase, SampledSpectrum(0.f)};
-}
-
-PBRT_CPU_GPU
-DDAMajorantIterator MacrofacetVDBMedium::SampleRay(
-    Ray ray, Float raytMax, const SampledWavelengths &lambda) const {
-    // Transform ray to medium's space and compute bounds overlap
-    ray = renderFromMedium.ApplyInverse(ray, &raytMax);
-    Float tMin, tMax;
-    if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
-        return {};
-    DCHECK_LE(tMax, raytMax);
-
-    SampledSpectrum sigma_t = SampledSpectrum(1.2f);
-
-    return DDAMajorantIterator(ray, tMin, tMax, &majorantGrid, sigma_t);
-}
-
 std::string MacrofacetVDBMedium::ToString() const {
     return StringPrintf("[ MacrofacetVDBMedium ]");
 }
@@ -1223,8 +887,6 @@ Medium Medium::Create(const std::string &name, const ParameterDictionary &parame
         m = NanoVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "spheremacrofacet") {
         m = SphereMacrofacet::Create(parameters, renderFromMedium, loc, alloc);
-    } else if (name == "knobmacrofacet") {
-        m = KnobMacrofacet::Create(parameters, renderFromMedium, loc, alloc);
     } else if (name == "macrofacetvdb") {
         m = MacrofacetVDBMedium::Create(parameters, renderFromMedium, loc, alloc);
     } else
