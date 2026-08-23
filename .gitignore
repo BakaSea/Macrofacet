@@ -12,3 +12,4 @@ out/
 *.ply.gz
 *.exr
 *.hdr
+scene/
